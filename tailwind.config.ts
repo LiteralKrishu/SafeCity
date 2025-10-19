@@ -11,7 +11,7 @@ export default {
     extend: {
       fontFamily: {
         body: ['Inter', 'sans-serif'],
-        headline: ['Inter', 'sans-serif'],
+        headline: ['Space Grotesk', 'sans-serif'],
         code: ['monospace'],
       },
       colors: {
@@ -64,6 +64,13 @@ export default {
           'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
           border: 'hsl(var(--sidebar-border))',
           ring: 'hsl(var(--sidebar-ring))',
+        },
+        status: {
+          normal: 'hsl(var(--status-normal))',
+          low: 'hsl(var(--status-low))',
+          medium: 'hsl(var(--status-medium))',
+          high: 'hsl(var(--status-high))',
+          emergency: 'hsl(var(--status-emergency))',
         },
       },
       borderRadius: {
