@@ -3,25 +3,35 @@
 import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { AlertCircle, Mic } from 'lucide-react';
+import { AlertCircle, Mic, Zap } from 'lucide-react';
 import type { AlertLevel } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 
 const MAX_DATA_POINTS = 50;
+const VOLUME_THRESHOLD = 25; // Average volume to trigger analysis
+const PITCH_THRESHOLD = 2000; // Pitch in Hz to be considered a scream
+const THREAT_COOLDOWN = 5000; // 5 seconds
 
 type AudioDataPoint = {
   time: number;
   volume: number;
+  pitch: number;
 };
 
-export function AudioVisualizer({ alertLevel }: { alertLevel: AlertLevel }) {
+interface AudioVisualizerProps {
+  alertLevel: AlertLevel;
+  setAlertLevel: (level: AlertLevel) => void;
+}
+
+export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerProps) {
   const [audioData, setAudioData] = useState<AudioDataPoint[]>([]);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number>();
+  const lastThreatTimeRef = useRef<number>(0);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -35,25 +45,49 @@ export function AudioVisualizer({ alertLevel }: { alertLevel: AlertLevel }) {
         audioContextRef.current = context;
         const source = context.createMediaStreamSource(stream);
         const analyser = context.createAnalyser();
-        analyser.fftSize = 256;
+        analyser.fftSize = 2048;
         source.connect(analyser);
         analyserRef.current = analyser;
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const timeDomainArray = new Uint8Array(analyser.fftSize);
 
         const updateVisualization = () => {
-          if (analyserRef.current) {
-            analyserRef.current.getByteTimeDomainData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += Math.abs(dataArray[i] - 128);
-            }
-            const average = sum / dataArray.length;
+          if (analyserRef.current && audioContextRef.current) {
+            analyserRef.current.getByteFrequencyData(dataArray);
+            analyserRef.current.getByteTimeDomainData(timeDomainArray);
             
+            let sum = 0;
+            for (let i = 0; i < timeDomainArray.length; i++) {
+              sum += Math.abs(timeDomainArray[i] - 128);
+            }
+            const averageVolume = sum / timeDomainArray.length;
+
+            let maxIndex = 0;
+            let maxVal = -1;
+            for (let i = 0; i < dataArray.length; i++) {
+                if(dataArray[i] > maxVal){
+                    maxVal = dataArray[i];
+                    maxIndex = i;
+                }
+            }
+            const dominantPitch = maxIndex * audioContextRef.current.sampleRate / analyserRef.current.fftSize;
+
+            const now = Date.now();
             setAudioData(prevData => {
-              const newData = [...prevData, { time: Date.now(), volume: average }];
+              const newData = [...prevData, { time: now, volume: averageVolume, pitch: dominantPitch }];
               return newData.length > MAX_DATA_POINTS ? newData.slice(newData.length - MAX_DATA_POINTS) : newData;
             });
+            
+            if (
+              alertLevel !== 'EMERGENCY' &&
+              averageVolume > VOLUME_THRESHOLD && 
+              dominantPitch > PITCH_THRESHOLD && 
+              (now - lastThreatTimeRef.current > THREAT_COOLDOWN)
+            ) {
+              lastThreatTimeRef.current = now;
+              setAlertLevel('HIGH_RISK');
+            }
           }
           animationFrameRef.current = requestAnimationFrame(updateVisualization);
         };
@@ -83,7 +117,7 @@ export function AudioVisualizer({ alertLevel }: { alertLevel: AlertLevel }) {
         audioContextRef.current.close();
       }
     };
-  }, [toast]);
+  }, [toast, setAlertLevel, alertLevel]);
   
   const getAlertColor = (level: AlertLevel) => {
     switch (level) {
@@ -97,11 +131,16 @@ export function AudioVisualizer({ alertLevel }: { alertLevel: AlertLevel }) {
   }
 
   const alertColor = getAlertColor(alertLevel);
+  const lastPitch = audioData.length > 0 ? audioData[audioData.length - 1].pitch.toFixed(0) : 0;
 
   return (
     <Card className="border-secondary/20 bg-card shadow-md">
-      <CardHeader>
-        <CardTitle className="font-headline text-lg flex items-center gap-2"><Mic className="h-5 w-5" /> Real-time Audio Analysis</CardTitle>
+      <CardHeader className="flex flex-row justify-between items-start">
+        <CardTitle className="font-headline text-lg flex items-center gap-2"><Mic className="h-5 w-5" /> Real-time Audio</CardTitle>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono">
+            <Zap className={cn("h-4 w-4 transition-colors", lastPitch > PITCH_THRESHOLD ? "text-status-high" : "text-muted-foreground")} />
+            <span>{lastPitch} Hz</span>
+        </div>
       </CardHeader>
       <CardContent>
         {hasMicPermission === false ? (
@@ -120,7 +159,7 @@ export function AudioVisualizer({ alertLevel }: { alertLevel: AlertLevel }) {
                   </linearGradient>
                 </defs>
                 <XAxis dataKey="time" hide={true} />
-                <YAxis domain={[0, 50]} hide={true} />
+                <YAxis domain={[0, 60]} hide={true} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: 'hsl(var(--background))',
@@ -129,7 +168,7 @@ export function AudioVisualizer({ alertLevel }: { alertLevel: AlertLevel }) {
                     borderRadius: 'var(--radius)',
                   }}
                   labelFormatter={() => ''}
-                  formatter={(value: number) => [value.toFixed(2), 'Volume']}
+                  formatter={(value: number, name) => [value.toFixed(2), name.charAt(0).toUpperCase() + name.slice(1)]}
                 />
                 <Area type="monotone" dataKey="volume" stroke={alertColor} strokeWidth={2} fill="url(#colorVolume)" />
               </AreaChart>

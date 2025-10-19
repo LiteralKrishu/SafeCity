@@ -8,18 +8,35 @@ import { RiskAssessment } from '@/components/dashboard/risk-assessment';
 import { EmergencyPanel } from '@/components/dashboard/emergency-panel';
 import { CameraFeed } from '@/components/dashboard/camera-feed';
 import { AudioVisualizer } from '@/components/dashboard/audio-visualizer';
+import { ThreatConfirmationDialog } from '@/components/dashboard/threat-confirmation-dialog';
 
 export default function Home() {
   const [alertLevel, setAlertLevel] = useState<AlertLevel>('NORMAL');
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
-  
+  const [showConfirmation, setShowConfirmation] = useState(false);
+
   useEffect(() => {
     setCurrentYear(new Date().getFullYear());
   }, []);
 
+  useEffect(() => {
+    if (alertLevel === 'HIGH_RISK' || alertLevel === 'EMERGENCY') {
+      setShowConfirmation(true);
+    }
+  }, [alertLevel]);
+
   const handleManualTrigger = () => {
     setAlertLevel('EMERGENCY');
   };
+  
+  const handleConfirmation = (isEmergency: boolean) => {
+    if (isEmergency) {
+      setAlertLevel('EMERGENCY');
+    } else {
+      setAlertLevel('NORMAL');
+    }
+    setShowConfirmation(false);
+  }
 
   return (
     <div className="flex min-h-screen w-full flex-col">
@@ -36,7 +53,7 @@ export default function Home() {
             <div className="lg:col-span-2 grid gap-8">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <CameraFeed />
-                <AudioVisualizer alertLevel={alertLevel} />
+                <AudioVisualizer alertLevel={alertLevel} setAlertLevel={setAlertLevel}/>
               </div>
               <SensorStatus alertLevel={alertLevel} />
             </div>
@@ -53,6 +70,11 @@ export default function Home() {
             <p className="font-headline">Your Personal Guardian</p>
         </div>
       </footer>
+      <ThreatConfirmationDialog 
+        open={showConfirmation}
+        onConfirm={() => handleConfirmation(true)}
+        onDismiss={() => handleConfirmation(false)}
+      />
     </div>
   );
 }
