@@ -13,10 +13,11 @@ import { NavMenu } from '@/components/dashboard/nav-menu';
 import { AppContext } from '@/context/app-context';
 import { Settings } from '@/components/dashboard/settings';
 import { HelpLine } from '@/components/dashboard/helpline';
-
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 export default function Home() {
-  const { activePage } = useContext(AppContext);
+  const { activePage, isMonitoring, toggleMonitoring } = useContext(AppContext);
   const [alertLevel, setAlertLevel] = useState<AlertLevel>('NORMAL');
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -30,6 +31,12 @@ export default function Home() {
       setShowConfirmation(true);
     }
   }, [alertLevel]);
+  
+  useEffect(() => {
+    if (!isMonitoring) {
+      setAlertLevel('NORMAL');
+    }
+  }, [isMonitoring])
 
   const handleManualTrigger = () => {
     setAlertLevel('EMERGENCY');
@@ -78,7 +85,11 @@ export default function Home() {
     <div className="flex min-h-screen w-full flex-col">
       <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur-lg md:px-6">
         <h1 className="font-headline text-xl font-bold md:text-2xl">SafeCity</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+                <Switch id="monitoring-switch" checked={isMonitoring} onCheckedChange={toggleMonitoring} />
+                <Label htmlFor="monitoring-switch" className="hidden sm:inline-block text-sm font-medium">Monitoring</Label>
+            </div>
             <span className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hidden sm:inline-block">v1.0</span>
             <NavMenu />
         </div>

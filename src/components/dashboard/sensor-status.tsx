@@ -2,7 +2,8 @@
 import { Video, MapPin, PersonStanding, Mic } from 'lucide-react';
 import { SensorCard } from './sensor-card';
 import type { AlertLevel } from '@/lib/types';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useContext } from 'react';
+import { AppContext } from '@/context/app-context';
 
 const sensorStatusMap: Record<AlertLevel, Record<string, string>> = {
     NORMAL: {
@@ -38,6 +39,7 @@ const sensorStatusMap: Record<AlertLevel, Record<string, string>> = {
 }
 
 export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
+  const { isMonitoring } = useContext(AppContext);
   const [hasPermission, setHasPermission] = useState({
     audio: false,
     vision: false,
@@ -46,6 +48,11 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
   });
 
   useEffect(() => {
+    if (!isMonitoring) {
+        setHasPermission({ audio: false, vision: false, location: false, motion: false });
+        return;
+    }
+
     navigator.mediaDevices.enumerateDevices().then(devices => {
       const audio = devices.some(d => d.kind === 'audioinput' && d.label);
       const video = devices.some(d => d.kind === 'videoinput' && d.label);
@@ -70,7 +77,7 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
         window.addEventListener('devicemotion', () => setHasPermission(prev => ({...prev, motion: true})), {once: true});
     }
 
-  }, []);
+  }, [isMonitoring]);
   
   const statuses = sensorStatusMap[alertLevel];
 
@@ -79,28 +86,28 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
       <SensorCard
         name="Audio Monitoring"
         icon={Mic}
-        isActive={hasPermission.audio}
+        isActive={isMonitoring && hasPermission.audio}
         statusText={statuses.Audio}
         alertLevel={alertLevel}
       />
       <SensorCard
         name="Vision Detection"
         icon={Video}
-        isActive={hasPermission.vision}
+        isActive={isMonitoring && hasPermission.vision}
         statusText={statuses.Vision}
         alertLevel={alertLevel}
       />
        <SensorCard
         name="Motion Analysis"
         icon={PersonStanding}
-        isActive={hasPermission.motion}
+        isActive={isMonitoring && hasPermission.motion}
         statusText={statuses.Motion}
         alertLevel={alertLevel}
       />
       <SensorCard
         name="Location Context"
         icon={MapPin}
-        isActive={hasPermission.location}
+        isActive={isMonitoring && hasPermission.location}
         statusText={statuses.Location}
         alertLevel={alertLevel}
       />

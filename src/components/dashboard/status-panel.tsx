@@ -3,6 +3,8 @@ import type { AlertLevel } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { ShieldCheck, AlertTriangle, Siren, ShieldOff, Bell } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useContext } from 'react';
+import { AppContext } from '@/context/app-context';
 
 type StatusInfo = {
   icon: React.ElementType;
@@ -45,6 +47,26 @@ const statusMap: Record<AlertLevel, StatusInfo> = {
 };
 
 export function StatusPanel({ alertLevel }: { alertLevel: AlertLevel }) {
+  const { isMonitoring } = useContext(AppContext);
+  
+  if (!isMonitoring) {
+    return (
+        <Card className="w-full border-secondary/20 bg-card shadow-xl">
+            <CardContent className="flex flex-col items-center justify-center p-6 text-center md:p-10">
+                <div className="rounded-full bg-secondary/30 p-3 md:p-4">
+                    <ShieldOff className="h-16 w-16 text-muted-foreground md:h-20 md:w-20" />
+                </div>
+                <h1 className="mt-4 font-headline text-3xl font-bold tracking-tighter text-muted-foreground md:text-5xl">
+                    Monitoring Off
+                </h1>
+                <p className="mt-2 max-w-xl text-sm text-muted-foreground md:text-base">
+                    Real-time threat analysis is currently disabled. Turn on monitoring to activate protection.
+                </p>
+            </CardContent>
+        </Card>
+    );
+  }
+
   const { icon: Icon, label, description, className } = statusMap[alertLevel];
 
   return (

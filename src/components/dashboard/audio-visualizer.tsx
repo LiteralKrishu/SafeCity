@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useContext } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { AlertCircle, Mic, Zap } from 'lucide-react';
+import { AlertCircle, Mic, Zap, ShieldOff } from 'lucide-react';
 import type { AlertLevel } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { analyzeAudioForDistress } from '@/ai/flows/analyze-audio-for-distress';
+import { AppContext } from '@/context/app-context';
 
 const MAX_DATA_POINTS = 50;
 const VOLUME_THRESHOLD = 25; // Average volume to trigger analysis
@@ -26,6 +27,7 @@ interface AudioVisualizerProps {
 }
 
 export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerProps) {
+  const { isMonitoring } = useContext(AppContext);
   const [audioData, setAudioData] = useState<AudioDataPoint[]>([]);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -67,7 +69,7 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
         } finally {
             isAnalyzingRef.current = false;
             // Restart recording only if the recorder is not already recording
-            if(mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
+            if(isMonitoring && mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
               mediaRecorderRef.current.start();
             }
         }
@@ -79,10 +81,36 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
       mediaRecorderRef.current.stop();
     }
   };
+  
+  const stopAudioProcessing = () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = undefined;
+      }
+      if(mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      mediaRecorderRef.current = null;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      setHasMicPermission(null);
+      setAudioData([]);
+  }
 
 
   useEffect(() => {
     const setupAudioProcessing = async () => {
+      if (!isMonitoring) {
+        stopAudioProcessing();
+        return;
+      }
+      
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         streamRef.current = stream;
@@ -138,11 +166,10 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
               !isAnalyzingRef.current &&
               alertLevel !== 'EMERGENCY' &&
               dominantPitch > PITCH_THRESHOLD &&
-              averageVolume > VOLUME_THRESHOLD && // Keep volume check to avoid quiet high-pitched noises
+              averageVolume > VOLUME_THRESHOLD &&
               (now - lastThreatTimeRef.current > THREAT_COOLDOWN)
             ) {
               lastThreatTimeRef.current = now;
-              // A high-pitched sound was detected, run AI analysis for confirmation
               handleAudioAnalysis();
             }
           }
@@ -164,21 +191,10 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
     setupAudioProcessing();
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-      if(mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop();
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close();
-      }
+      stopAudioProcessing();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isMonitoring]);
   
   const getAlertColor = (level: AlertLevel) => {
     switch (level) {
@@ -199,16 +215,23 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
     <Card className="border-secondary/20 bg-card shadow-md">
       <CardHeader className="flex flex-row justify-between items-start">
         <CardTitle className="font-headline text-lg flex items-center gap-2"><Mic className="h-5 w-5" /> Real-time Audio</CardTitle>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono">
-            <Zap className={cn("h-4 w-4 transition-colors", +lastPitch > PITCH_THRESHOLD || +lastVolume > VOLUME_THRESHOLD ? "text-status-high" : "text-muted-foreground")} />
-            <span>{lastPitch} Hz</span>
-        </div>
+        {isMonitoring && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono">
+                <Zap className={cn("h-4 w-4 transition-colors", +lastPitch > PITCH_THRESHOLD || +lastVolume > VOLUME_THRESHOLD ? "text-status-high" : "text-muted-foreground")} />
+                <span>{lastPitch} Hz</span>
+            </div>
+        )}
       </CardHeader>
       <CardContent>
-        {hasMicPermission === false ? (
+        {!isMonitoring ? (
+          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+            <ShieldOff className="w-10 h-10 mb-2" />
+            <p>Monitoring is turned off.</p>
+          </div>
+        ) : hasMicPermission === false ? (
           <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
             <AlertCircle className="w-10 h-10 mb-2" />
-            <p>Microphone access is required to display the audio graph.</p>
+            <p>Microphone access is required for audio analysis.</p>
           </div>
         ) : (
           <div className="h-48">
