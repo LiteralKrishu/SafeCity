@@ -11,7 +11,7 @@ import { analyzeAudioForDistress } from '@/ai/flows/analyze-audio-for-distress';
 
 const MAX_DATA_POINTS = 50;
 const VOLUME_THRESHOLD = 25; // Average volume to trigger analysis
-const PITCH_THRESHOLD = 2000; // Pitch in Hz to be considered a scream (fallback)
+const PITCH_THRESHOLD = 2000; // Pitch in Hz to be considered a scream
 const THREAT_COOLDOWN = 10000; // 10 seconds
 
 type AudioDataPoint = {
@@ -137,17 +137,13 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
             if (
               !isAnalyzingRef.current &&
               alertLevel !== 'EMERGENCY' &&
-              averageVolume > VOLUME_THRESHOLD &&
+              dominantPitch > PITCH_THRESHOLD &&
+              averageVolume > VOLUME_THRESHOLD && // Keep volume check to avoid quiet high-pitched noises
               (now - lastThreatTimeRef.current > THREAT_COOLDOWN)
             ) {
-                // If pitch is very high, trigger immediately (fallback for screams).
-                if(dominantPitch > PITCH_THRESHOLD) {
-                    lastThreatTimeRef.current = now;
-                    setAlertLevel('HIGH_RISK');
-                } else {
-                    // Otherwise, run AI analysis
-                    handleAudioAnalysis();
-                }
+              lastThreatTimeRef.current = now;
+              // A high-pitched sound was detected, run AI analysis for confirmation
+              handleAudioAnalysis();
             }
           }
           animationFrameRef.current = requestAnimationFrame(updateVisualization);
