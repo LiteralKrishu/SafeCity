@@ -7,11 +7,13 @@ import { AlertCircle, Mic, Zap } from 'lucide-react';
 import type { AlertLevel } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { analyzeAudioForDistress } from '@/ai/flows/analyze-audio-for-distress';
 
 const MAX_DATA_POINTS = 50;
 const VOLUME_THRESHOLD = 25; // Average volume to trigger analysis
-const PITCH_THRESHOLD = 2000; // Pitch in Hz to be considered a scream
-const THREAT_COOLDOWN = 5000; // 5 seconds
+const PITCH_THRESHOLD = 2000; // Pitch in Hz to be considered a scream (fallback)
+const THREAT_COOLDOWN = 10000; // 10 seconds
+const AUDIO_CAPTURE_DURATION = 3000; // 3 seconds
 
 type AudioDataPoint = {
   time: number;
@@ -32,7 +34,51 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number>();
   const lastThreatTimeRef = useRef<number>(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const isAnalyzingRef = useRef<boolean>(false);
+
   const { toast } = useToast();
+
+  const handleAudioAnalysis = async () => {
+    if (isAnalyzingRef.current || !mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') {
+      return;
+    }
+    isAnalyzingRef.current = true;
+    
+    // Stop recording to get the blob
+    mediaRecorderRef.current.stop();
+
+    mediaRecorderRef.current.onstop = async () => {
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      audioChunksRef.current = []; // Clear chunks for next recording
+      
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        const base64Audio = reader.result as string;
+        try {
+          const { isDistress } = await analyzeAudioForDistress({ audioDataUri: base64Audio });
+          if (isDistress) {
+            const now = Date.now();
+            if (alertLevel !== 'EMERGENCY' && now - lastThreatTimeRef.current > THREAT_COOLDOWN) {
+              lastThreatTimeRef.current = now;
+              setAlertLevel('HIGH_RISK');
+            }
+          }
+        } catch(e) {
+            console.error("AI analysis failed: ", e);
+        } finally {
+            isAnalyzingRef.current = false;
+            // Restart recording
+            if(mediaRecorderRef.current && mediaRecorderRef.current.state !== 'recording') {
+              mediaRecorderRef.current.start();
+            }
+        }
+      };
+    };
+  };
+
 
   useEffect(() => {
     const setupAudioProcessing = async () => {
@@ -48,6 +94,12 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
         analyser.fftSize = 2048;
         source.connect(analyser);
         analyserRef.current = analyser;
+
+        mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorderRef.current.ondataavailable = (event) => {
+            audioChunksRef.current.push(event.data);
+        };
+        mediaRecorderRef.current.start();
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
         const timeDomainArray = new Uint8Array(analyser.fftSize);
@@ -80,13 +132,19 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
             });
             
             if (
+              !isAnalyzingRef.current &&
               alertLevel !== 'EMERGENCY' &&
-              averageVolume > VOLUME_THRESHOLD && 
-              dominantPitch > PITCH_THRESHOLD && 
+              averageVolume > VOLUME_THRESHOLD &&
               (now - lastThreatTimeRef.current > THREAT_COOLDOWN)
             ) {
-              lastThreatTimeRef.current = now;
-              setAlertLevel('HIGH_RISK');
+                // If pitch is very high, trigger immediately (fallback for screams).
+                if(dominantPitch > PITCH_THRESHOLD) {
+                    lastThreatTimeRef.current = now;
+                    setAlertLevel('HIGH_RISK');
+                } else {
+                    // Otherwise, run AI analysis
+                    handleAudioAnalysis();
+                }
             }
           }
           animationFrameRef.current = requestAnimationFrame(updateVisualization);
@@ -110,6 +168,9 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
+      if(mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -117,6 +178,7 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
         audioContextRef.current.close();
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast, setAlertLevel, alertLevel]);
   
   const getAlertColor = (level: AlertLevel) => {
@@ -132,13 +194,14 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
 
   const alertColor = getAlertColor(alertLevel);
   const lastPitch = audioData.length > 0 ? audioData[audioData.length - 1].pitch.toFixed(0) : 0;
+  const lastVolume = audioData.length > 0 ? audioData[audioData.length - 1].volume.toFixed(0) : 0;
 
   return (
     <Card className="border-secondary/20 bg-card shadow-md">
       <CardHeader className="flex flex-row justify-between items-start">
         <CardTitle className="font-headline text-lg flex items-center gap-2"><Mic className="h-5 w-5" /> Real-time Audio</CardTitle>
         <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono">
-            <Zap className={cn("h-4 w-4 transition-colors", lastPitch > PITCH_THRESHOLD ? "text-status-high" : "text-muted-foreground")} />
+            <Zap className={cn("h-4 w-4 transition-colors", +lastPitch > PITCH_THRESHOLD || +lastVolume > VOLUME_THRESHOLD ? "text-status-high" : "text-muted-foreground")} />
             <span>{lastPitch} Hz</span>
         </div>
       </CardHeader>
