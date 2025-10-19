@@ -5,18 +5,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Globe, Clock, ShieldAlert } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import type { AlertLevel } from '@/lib/types';
 
-export function RiskAssessment() {
+interface RiskAssessmentProps {
+    alertLevel: AlertLevel;
+    setAlertLevel: (level: AlertLevel) => void;
+}
+
+export function RiskAssessment({ alertLevel, setAlertLevel }: RiskAssessmentProps) {
   const [location, setLocation] = useState<string | null>(null);
   const [time, setTime] = useState<string>('--:--:--');
   const [riskScore, setRiskScore] = useState<number>(0);
 
   useEffect(() => {
-    // Get location
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          // In a real app, you'd reverse geocode this. For now, just show coords.
           const { latitude, longitude } = position.coords;
           setLocation(`${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°`);
         },
@@ -28,26 +32,37 @@ export function RiskAssessment() {
       setLocation('Not Supported');
     }
 
-    // Update time and risk score every second
     const intervalId = setInterval(() => {
       const now = new Date();
       setTime(now.toLocaleTimeString());
       
-      // Simplified risk score calculation (e.g., higher risk at night)
       const hour = now.getHours();
-      let score = 20; // Base score
-      if (hour < 6 || hour > 20) { // Night time
+      let score = 20;
+      if (hour < 6 || hour > 20) {
         score += 40;
       }
       if (location && (location === 'Permission Denied' || location === 'Not Supported')) {
         score += 15;
       }
-      setRiskScore(Math.min(100, score));
+      const newRiskScore = Math.min(100, score);
+      setRiskScore(newRiskScore);
+
+      if (alertLevel !== 'EMERGENCY') {
+        if (newRiskScore > 75) {
+            setAlertLevel('HIGH_RISK');
+        } else if (newRiskScore > 50) {
+            setAlertLevel('MEDIUM_RISK');
+        } else if (newRiskScore > 25) {
+            setAlertLevel('LOW_RISK');
+        } else {
+            setAlertLevel('NORMAL');
+        }
+      }
 
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [location]);
+  }, [location, setAlertLevel, alertLevel]);
 
   const getRiskColor = (score: number) => {
     if (score > 75) return 'text-status-high';

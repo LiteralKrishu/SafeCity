@@ -14,7 +14,7 @@ export function CameraFeed() {
   useEffect(() => {
     const getCameraPermission = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         setHasCameraPermission(true);
 
         if (videoRef.current) {
@@ -26,7 +26,7 @@ export function CameraFeed() {
         toast({
           variant: 'destructive',
           title: 'Camera Access Denied',
-          description: 'Please enable camera and microphone permissions in your browser settings to use this app.',
+          description: 'Please enable camera permissions in your browser settings to use this app.',
         });
       }
     };
@@ -55,7 +55,7 @@ export function CameraFeed() {
                 <Alert variant="destructive" className="mt-4">
                     <AlertTitle>Camera Access Required</AlertTitle>
                     <AlertDescription>
-                        Please allow camera and microphone access to use this feature. You may need to change permissions in your browser settings.
+                        Please allow camera access to use this feature. You may need to change permissions in your browser settings.
                     </AlertDescription>
                 </Alert>
             )}

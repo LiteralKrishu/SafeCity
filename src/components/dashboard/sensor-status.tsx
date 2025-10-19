@@ -1,5 +1,5 @@
 'use client';
-import { Video, MapPin, PersonStanding } from 'lucide-react';
+import { Video, MapPin, PersonStanding, Mic } from 'lucide-react';
 import { SensorCard } from './sensor-card';
 import type { AlertLevel } from '@/lib/types';
 import { useState, useEffect } from 'react';
@@ -39,19 +39,19 @@ const sensorStatusMap: Record<AlertLevel, Record<string, string>> = {
 
 export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
   const [hasPermission, setHasPermission] = useState({
+    audio: false,
     vision: false,
     location: false,
     motion: false,
   });
 
   useEffect(() => {
-    // Check for camera and mic permission
     navigator.mediaDevices.enumerateDevices().then(devices => {
+      const audio = devices.some(d => d.kind === 'audioinput' && d.label);
       const video = devices.some(d => d.kind === 'videoinput' && d.label);
-      setHasPermission(prev => ({...prev, vision: video}));
+      setHasPermission(prev => ({...prev, audio, vision: video}));
     });
 
-    // Check for location permission
     navigator.permissions.query({name:'geolocation'}).then(permissionStatus => {
         setHasPermission(prev => ({...prev, location: permissionStatus.state === 'granted'}));
         permissionStatus.onchange = () => {
@@ -59,7 +59,6 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
         }
     });
 
-    // Check for motion sensor permission
     if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
       (DeviceMotionEvent as any).requestPermission()
         .then((permissionState: string) => {
@@ -68,7 +67,6 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
           }
         })
     } else {
-        // Handle non-iOS 13+ devices.
         window.addEventListener('devicemotion', () => setHasPermission(prev => ({...prev, motion: true})), {once: true});
     }
 
@@ -77,7 +75,14 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
   const statuses = sensorStatusMap[alertLevel];
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+      <SensorCard
+        name="Audio Monitoring"
+        icon={Mic}
+        isActive={hasPermission.audio}
+        statusText={statuses.Audio}
+        alertLevel={alertLevel}
+      />
       <SensorCard
         name="Vision Detection"
         icon={Video}

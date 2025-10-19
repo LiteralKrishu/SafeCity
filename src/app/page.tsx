@@ -26,7 +26,7 @@ export default function Home() {
       <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur-lg md:px-6">
         <h1 className="font-headline text-xl font-bold md:text-2xl">SafeCity</h1>
         <div className="flex items-center gap-2">
-            <span className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">MVP</span>
+            <span className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">v1.0</span>
         </div>
       </header>
       <main className="flex-1 p-4 md:p-8 lg:p-12">
@@ -34,12 +34,14 @@ export default function Home() {
           <StatusPanel alertLevel={alertLevel} />
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
             <div className="lg:col-span-2 grid gap-8">
-              <CameraFeed />
-              <AudioVisualizer alertLevel={alertLevel} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <CameraFeed />
+                <AudioVisualizer alertLevel={alertLevel} />
+              </div>
               <SensorStatus alertLevel={alertLevel} />
             </div>
             <div className="lg:col-span-1">
-              <RiskAssessment />
+              <RiskAssessment alertLevel={alertLevel} setAlertLevel={setAlertLevel} />
             </div>
           </div>
           <EmergencyPanel alertLevel={alertLevel} onManualTrigger={handleManualTrigger} />
