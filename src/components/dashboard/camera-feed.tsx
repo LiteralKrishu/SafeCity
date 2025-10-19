@@ -43,12 +43,12 @@ export function CameraFeed() {
   }, [toast]);
 
   return (
-    <Card className="border-secondary/20 bg-card shadow-md">
+    <Card className="border-secondary/20 bg-card shadow-md flex flex-col">
         <CardHeader>
             <CardTitle className="font-headline text-lg flex items-center gap-2"><Video className="h-5 w-5" /> Live Feed</CardTitle>
         </CardHeader>
-        <CardContent>
-            <div className="aspect-video w-full overflow-hidden rounded-md bg-muted">
+        <CardContent className="flex-grow flex flex-col">
+            <div className="aspect-video w-full overflow-hidden rounded-md bg-muted flex-grow">
                 <video ref={videoRef} className="h-full w-full object-cover" autoPlay muted playsInline />
             </div>
             {hasCameraPermission === false && (

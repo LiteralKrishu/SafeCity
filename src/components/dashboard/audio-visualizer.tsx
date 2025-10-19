@@ -13,7 +13,6 @@ const MAX_DATA_POINTS = 50;
 const VOLUME_THRESHOLD = 25; // Average volume to trigger analysis
 const PITCH_THRESHOLD = 2000; // Pitch in Hz to be considered a scream (fallback)
 const THREAT_COOLDOWN = 10000; // 10 seconds
-const AUDIO_CAPTURE_DURATION = 3000; // 3 seconds
 
 type AudioDataPoint = {
   time: number;
@@ -46,12 +45,9 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
     }
     isAnalyzingRef.current = true;
     
-    // Stop recording to get the blob
-    mediaRecorderRef.current.stop();
-
     mediaRecorderRef.current.onstop = async () => {
       const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      audioChunksRef.current = []; // Clear chunks for next recording
+      audioChunksRef.current = [];
       
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
@@ -70,13 +66,18 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
             console.error("AI analysis failed: ", e);
         } finally {
             isAnalyzingRef.current = false;
-            // Restart recording
-            if(mediaRecorderRef.current && mediaRecorderRef.current.state !== 'recording') {
+            // Restart recording only if the recorder is not already recording
+            if(mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
               mediaRecorderRef.current.start();
             }
         }
       };
     };
+    
+    // Stop recording to trigger onstop
+    if (mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
   };
 
 
@@ -97,7 +98,9 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
 
         mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         mediaRecorderRef.current.ondataavailable = (event) => {
-            audioChunksRef.current.push(event.data);
+            if (event.data.size > 0) {
+              audioChunksRef.current.push(event.data);
+            }
         };
         mediaRecorderRef.current.start();
 
@@ -179,7 +182,7 @@ export function AudioVisualizer({ alertLevel, setAlertLevel }: AudioVisualizerPr
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast, setAlertLevel, alertLevel]);
+  }, []);
   
   const getAlertColor = (level: AlertLevel) => {
     switch (level) {

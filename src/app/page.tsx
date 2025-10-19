@@ -50,9 +50,9 @@ export default function Home() {
         return (
           <>
             <StatusPanel alertLevel={alertLevel} />
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-              <div className="lg:col-span-2 grid gap-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <CameraFeed />
                   <AudioVisualizer alertLevel={alertLevel} setAlertLevel={setAlertLevel}/>
                 </div>
@@ -83,8 +83,8 @@ export default function Home() {
             <NavMenu />
         </div>
       </header>
-      <main className="flex-1 p-4 md:p-8 lg:p-12">
-        <div className="mx-auto grid max-w-7xl items-start gap-8">
+      <main className="flex-1 p-4 md:p-6 lg:p-8">
+        <div className="mx-auto grid max-w-7xl items-start gap-6">
           {renderContent()}
         </div>
       </main>
