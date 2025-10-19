@@ -7,18 +7,15 @@ import { SensorStatus } from '@/components/dashboard/sensor-status';
 import { RiskAssessment } from '@/components/dashboard/risk-assessment';
 import { EmergencyPanel } from '@/components/dashboard/emergency-panel';
 import { CameraFeed } from '@/components/dashboard/camera-feed';
-import { useToast } from '@/hooks/use-toast';
+import { AudioVisualizer } from '@/components/dashboard/audio-visualizer';
 
 export default function Home() {
   const [alertLevel, setAlertLevel] = useState<AlertLevel>('NORMAL');
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
-  const { toast } = useToast();
-  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
-
+  
   useEffect(() => {
     setCurrentYear(new Date().getFullYear());
   }, []);
-
 
   const handleManualTrigger = () => {
     setAlertLevel('EMERGENCY');
@@ -38,6 +35,7 @@ export default function Home() {
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
             <div className="lg:col-span-2 grid gap-8">
               <CameraFeed />
+              <AudioVisualizer alertLevel={alertLevel} />
               <SensorStatus alertLevel={alertLevel} />
             </div>
             <div className="lg:col-span-1">

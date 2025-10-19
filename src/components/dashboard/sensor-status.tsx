@@ -1,5 +1,5 @@
 'use client';
-import { Mic, Video, MapPin, PersonStanding } from 'lucide-react';
+import { Video, MapPin, PersonStanding } from 'lucide-react';
 import { SensorCard } from './sensor-card';
 import type { AlertLevel } from '@/lib/types';
 import { useState, useEffect } from 'react';
@@ -39,7 +39,6 @@ const sensorStatusMap: Record<AlertLevel, Record<string, string>> = {
 
 export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
   const [hasPermission, setHasPermission] = useState({
-    audio: false,
     vision: false,
     location: false,
     motion: false,
@@ -48,9 +47,8 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
   useEffect(() => {
     // Check for camera and mic permission
     navigator.mediaDevices.enumerateDevices().then(devices => {
-      const audio = devices.some(d => d.kind === 'audioinput' && d.label);
       const video = devices.some(d => d.kind === 'videoinput' && d.label);
-      setHasPermission(prev => ({...prev, audio, vision: video}));
+      setHasPermission(prev => ({...prev, vision: video}));
     });
 
     // Check for location permission
@@ -79,14 +77,7 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
   const statuses = sensorStatusMap[alertLevel];
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <SensorCard
-        name="Audio Analysis"
-        icon={Mic}
-        isActive={hasPermission.audio}
-        statusText={statuses.Audio}
-        alertLevel={alertLevel}
-      />
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <SensorCard
         name="Vision Detection"
         icon={Video}
