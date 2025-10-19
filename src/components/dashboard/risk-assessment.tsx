@@ -38,7 +38,7 @@ export function RiskAssessment({ alertLevel, setAlertLevel }: RiskAssessmentProp
       
       const hour = now.getHours();
       let score = 20;
-      if (hour < 6 || hour > 20) {
+      if (hour < 6 || hour > 22) { // increased night-time hours
         score += 40;
       }
       if (location && (location === 'Permission Denied' || location === 'Not Supported')) {
@@ -47,12 +47,10 @@ export function RiskAssessment({ alertLevel, setAlertLevel }: RiskAssessmentProp
       const newRiskScore = Math.min(100, score);
       setRiskScore(newRiskScore);
 
-      if (alertLevel !== 'EMERGENCY') {
+      if (alertLevel !== 'EMERGENCY' && alertLevel !== 'HIGH_RISK') {
         if (newRiskScore > 75) {
-            setAlertLevel('HIGH_RISK');
-        } else if (newRiskScore > 50) {
             setAlertLevel('MEDIUM_RISK');
-        } else if (newRiskScore > 25) {
+        } else if (newRiskScore > 40) {
             setAlertLevel('LOW_RISK');
         } else {
             setAlertLevel('NORMAL');
@@ -80,7 +78,7 @@ export function RiskAssessment({ alertLevel, setAlertLevel }: RiskAssessmentProp
         <div className="flex items-center">
           <Globe className="mr-3 h-5 w-5 text-muted-foreground" />
           <span className="font-medium">Location:</span>
-          {location ? <span className="ml-2 font-mono">{location}</span> : <Skeleton className="ml-2 h-4 w-32" />}
+          {location ? <span className="ml-2 font-mono">{location}</span> : <Skeleton className="ml-2 h-4 w-24" />}
         </div>
         <div className="flex items-center">
           <Clock className="mr-3 h-5 w-5 text-muted-foreground" />
@@ -89,8 +87,8 @@ export function RiskAssessment({ alertLevel, setAlertLevel }: RiskAssessmentProp
         </div>
         <div className="flex items-center">
           <ShieldAlert className="mr-3 h-5 w-5 text-muted-foreground" />
-          <span className="font-medium">Dynamic Risk Score:</span>
-          <span className={cn('ml-2 font-bold font-mono', getRiskColor(riskScore))}>{riskScore} / 100</span>
+          <span className="font-medium">Dynamic Risk:</span>
+          <span className={cn('ml-2 font-bold font-mono text-base', getRiskColor(riskScore))}>{riskScore} / 100</span>
         </div>
       </CardContent>
     </Card>

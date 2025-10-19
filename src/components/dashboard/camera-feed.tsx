@@ -111,8 +111,8 @@ export function CameraFeed({ alertLevel, setAlertLevel }: CameraFeedProps) {
 
   }, [hasCameraPermission, isAnalyzing, setAlertLevel]);
 
-  const EmotionIcon = detectedEmotion === 'fear' || detectedEmotion === 'anger' ? Frown : Smile;
-  const isThreatDetected = haphazardMovement || detectedEmotion === 'fear' || detectedEmotion === 'anger';
+  const EmotionIcon = detectedEmotion === 'fear' || detectedEmotion === 'anger' || detectedEmotion === 'sadness' ? Frown : Smile;
+  const isThreatDetected = haphazardMovement || detectedEmotion === 'fear' || detectedEmotion === 'anger' || detectedEmotion === 'sadness';
 
   return (
     <Card className="border-secondary/20 bg-card shadow-md flex flex-col">
@@ -130,8 +130,8 @@ export function CameraFeed({ alertLevel, setAlertLevel }: CameraFeedProps) {
           <video ref={videoRef} className="h-full w-full object-cover" autoPlay muted playsInline />
           <canvas ref={canvasRef} className="hidden" />
           {hasCameraPermission === false && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Alert variant="destructive" className="m-4">
+            <div className="absolute inset-0 flex items-center justify-center p-4">
+              <Alert variant="destructive">
                 <AlertTitle>Camera Access Required</AlertTitle>
                 <AlertDescription>
                   Please allow camera access to use this feature.
@@ -141,7 +141,7 @@ export function CameraFeed({ alertLevel, setAlertLevel }: CameraFeedProps) {
           )}
         </div>
       </CardContent>
-      <CardFooter className="grid grid-cols-2 gap-4 text-xs pt-4">
+      <CardFooter className="grid grid-cols-2 gap-2 text-xs pt-4 sm:gap-4">
         <div className="flex items-center gap-2">
             <PersonStanding className={cn("h-4 w-4", haphazardMovement ? 'text-status-high' : 'text-muted-foreground')} />
             <span className="text-muted-foreground">Movement:</span>

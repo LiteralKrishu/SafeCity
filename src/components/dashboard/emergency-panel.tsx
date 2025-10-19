@@ -9,7 +9,7 @@ export function EmergencyPanel({ alertLevel, onManualTrigger }: { alertLevel: Al
 
   return (
     <div className={cn(
-        "mt-8 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-secondary/20 p-8 text-center transition-all",
+        "mt-6 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-secondary/20 p-6 text-center transition-all md:p-8",
         isEmergency ? "border-status-emergency/40 bg-status-emergency/10" : ""
     )}>
       {isEmergency ? (
@@ -17,18 +17,18 @@ export function EmergencyPanel({ alertLevel, onManualTrigger }: { alertLevel: Al
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-status-emergency/20">
             <PhoneForwarded className="h-8 w-8 text-status-emergency" />
           </div>
-          <h3 className="mt-4 font-headline text-2xl font-bold text-status-emergency">Emergency Alert Sent</h3>
-          <p className="mt-2 max-w-lg text-muted-foreground">
+          <h3 className="mt-4 font-headline text-xl font-bold text-status-emergency md:text-2xl">Emergency Alert Sent</h3>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground md:text-base">
             Your emergency contacts have been notified with your current location and status. Help is on the way.
           </p>
         </>
       ) : (
         <>
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-secondary/20">
-            <ShieldQuestion className="h-8 w-8 text-primary" />
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-secondary/20 md:h-16 md:w-16">
+            <ShieldQuestion className="h-7 w-7 text-primary md:h-8 md:w-8" />
           </div>
-          <h3 className="mt-4 font-headline text-2xl font-bold">Need Immediate Help?</h3>
-          <p className="mt-2 max-w-lg text-muted-foreground">
+          <h3 className="mt-4 font-headline text-xl font-bold md:text-2xl">Need Immediate Help?</h3>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground md:text-base">
             If you are in danger, you can manually trigger an emergency alert. This will immediately notify your emergency contacts and local authorities.
           </p>
           <Button onClick={onManualTrigger} variant="destructive" size="lg" className="mt-6 font-bold">

@@ -26,7 +26,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (alertLevel === 'HIGH_RISK' || alertLevel === 'EMERGENCY') {
+    if (alertLevel === 'HIGH_RISK') {
       setShowConfirmation(true);
     }
   }, [alertLevel]);
@@ -58,7 +58,7 @@ export default function Home() {
                 </div>
                 <SensorStatus alertLevel={alertLevel} />
               </div>
-              <div className="lg:col-span-1">
+              <div className="lg:col-span-1 flex flex-col gap-6">
                 <RiskAssessment alertLevel={alertLevel} setAlertLevel={setAlertLevel} />
               </div>
             </div>
@@ -91,7 +91,7 @@ export default function Home() {
       <footer className="mt-auto shrink-0 border-t px-4 py-4 md:px-6">
         <div className="mx-auto flex max-w-7xl items-center justify-between text-sm text-muted-foreground">
             <p>&copy; {currentYear} SafeCity. All rights reserved.</p>
-            <p className="font-headline">Your Personal Guardian</p>
+            <p className="font-headline hidden sm:block">Your Personal Guardian</p>
         </div>
       </footer>
       <ThreatConfirmationDialog 

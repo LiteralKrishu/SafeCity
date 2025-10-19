@@ -52,17 +52,17 @@ export function StatusPanel({ alertLevel }: { alertLevel: AlertLevel }) {
         "w-full border-secondary/20 bg-card shadow-xl transition-all duration-500", 
         alertLevel === 'EMERGENCY' ? 'border-status-emergency/50 bg-status-emergency/10' : ''
     )}>
-      <CardContent className="flex flex-col items-center justify-center p-8 text-center md:p-12">
+      <CardContent className="flex flex-col items-center justify-center p-6 text-center md:p-10">
         <div className="relative">
             {alertLevel === 'EMERGENCY' && <div className="absolute h-full w-full animate-ping rounded-full bg-status-emergency/50"></div>}
-            <div className={cn('relative z-10 rounded-full bg-secondary/30 p-4 transition-all', {'bg-status-emergency/20': alertLevel === 'EMERGENCY'})}>
-                <Icon className={cn('h-20 w-20 transition-colors md:h-24 md:w-24', className)} />
+            <div className={cn('relative z-10 rounded-full bg-secondary/30 p-3 md:p-4 transition-all', {'bg-status-emergency/20': alertLevel === 'EMERGENCY'})}>
+                <Icon className={cn('h-16 w-16 transition-colors md:h-20 md:w-20', className)} />
             </div>
         </div>
-        <h1 className={cn('mt-6 font-headline text-4xl font-bold tracking-tighter transition-colors md:text-5xl', className)}>
+        <h1 className={cn('mt-4 font-headline text-3xl font-bold tracking-tighter transition-colors md:text-5xl', className)}>
           {label}
         </h1>
-        <p className="mt-2 max-w-2xl text-base text-muted-foreground md:text-lg">{description}</p>
+        <p className="mt-2 max-w-xl text-sm text-muted-foreground md:text-base">{description}</p>
       </CardContent>
     </Card>
   );
