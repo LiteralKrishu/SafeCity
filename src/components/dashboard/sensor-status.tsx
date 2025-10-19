@@ -2,7 +2,7 @@
 import { Mic, Video, MapPin, PersonStanding } from 'lucide-react';
 import { SensorCard } from './sensor-card';
 import type { AlertLevel } from '@/lib/types';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const sensorStatusMap: Record<AlertLevel, Record<string, string>> = {
     NORMAL: {
@@ -38,12 +38,43 @@ const sensorStatusMap: Record<AlertLevel, Record<string, string>> = {
 }
 
 export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
-  const [activeSensors] = useState({
-    audio: true,
-    vision: true,
-    location: true,
-    motion: true,
+  const [hasPermission, setHasPermission] = useState({
+    audio: false,
+    vision: false,
+    location: false,
+    motion: false,
   });
+
+  useEffect(() => {
+    // Check for camera and mic permission
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      const audio = devices.some(d => d.kind === 'audioinput' && d.label);
+      const video = devices.some(d => d.kind === 'videoinput' && d.label);
+      setHasPermission(prev => ({...prev, audio, vision: video}));
+    });
+
+    // Check for location permission
+    navigator.permissions.query({name:'geolocation'}).then(permissionStatus => {
+        setHasPermission(prev => ({...prev, location: permissionStatus.state === 'granted'}));
+        permissionStatus.onchange = () => {
+            setHasPermission(prev => ({...prev, location: permissionStatus.state === 'granted'}));
+        }
+    });
+
+    // Check for motion sensor permission
+    if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+      (DeviceMotionEvent as any).requestPermission()
+        .then((permissionState: string) => {
+          if (permissionState === 'granted') {
+            setHasPermission(prev => ({...prev, motion: true}));
+          }
+        })
+    } else {
+        // Handle non-iOS 13+ devices.
+        window.addEventListener('devicemotion', () => setHasPermission(prev => ({...prev, motion: true})), {once: true});
+    }
+
+  }, []);
   
   const statuses = sensorStatusMap[alertLevel];
 
@@ -52,28 +83,28 @@ export function SensorStatus({ alertLevel }: { alertLevel: AlertLevel }) {
       <SensorCard
         name="Audio Analysis"
         icon={Mic}
-        isActive={activeSensors.audio}
+        isActive={hasPermission.audio}
         statusText={statuses.Audio}
         alertLevel={alertLevel}
       />
       <SensorCard
         name="Vision Detection"
         icon={Video}
-        isActive={activeSensors.vision}
+        isActive={hasPermission.vision}
         statusText={statuses.Vision}
         alertLevel={alertLevel}
       />
        <SensorCard
         name="Motion Analysis"
         icon={PersonStanding}
-        isActive={activeSensors.motion}
+        isActive={hasPermission.motion}
         statusText={statuses.Motion}
         alertLevel={alertLevel}
       />
       <SensorCard
         name="Location Context"
         icon={MapPin}
-        isActive={activeSensors.location}
+        isActive={hasPermission.location}
         statusText={statuses.Location}
         alertLevel={alertLevel}
       />

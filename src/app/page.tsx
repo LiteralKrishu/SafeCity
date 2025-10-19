@@ -6,27 +6,14 @@ import { StatusPanel } from '@/components/dashboard/status-panel';
 import { SensorStatus } from '@/components/dashboard/sensor-status';
 import { RiskAssessment } from '@/components/dashboard/risk-assessment';
 import { EmergencyPanel } from '@/components/dashboard/emergency-panel';
-
-const alertLevels: AlertLevel[] = ['NORMAL', 'LOW_RISK', 'MEDIUM_RISK', 'HIGH_RISK', 'EMERGENCY'];
+import { CameraFeed } from '@/components/dashboard/camera-feed';
+import { useToast } from '@/hooks/use-toast';
 
 export default function Home() {
   const [alertLevel, setAlertLevel] = useState<AlertLevel>('NORMAL');
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
-
-  // Automatically cycle through alert levels for demonstration
-  useEffect(() => {
-    const cycleAlerts = () => {
-      setAlertLevel(prevLevel => {
-        const currentIndex = alertLevels.indexOf(prevLevel);
-        const nextIndex = (currentIndex + 1) % alertLevels.length;
-        return alertLevels[nextIndex];
-      });
-    };
-
-    const intervalId = setInterval(cycleAlerts, 7000); // Change level every 7 seconds
-
-    return () => clearInterval(intervalId);
-  }, []);
+  const { toast } = useToast();
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
 
   useEffect(() => {
     setCurrentYear(new Date().getFullYear());
@@ -42,14 +29,15 @@ export default function Home() {
       <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur-lg md:px-6">
         <h1 className="font-headline text-xl font-bold md:text-2xl">SafeCity</h1>
         <div className="flex items-center gap-2">
-            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">DEMO</span>
+            <span className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">MVP</span>
         </div>
       </header>
       <main className="flex-1 p-4 md:p-8 lg:p-12">
         <div className="mx-auto grid max-w-7xl items-start gap-8">
           <StatusPanel alertLevel={alertLevel} />
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 grid gap-8">
+              <CameraFeed />
               <SensorStatus alertLevel={alertLevel} />
             </div>
             <div className="lg:col-span-1">
