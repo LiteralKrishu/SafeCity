@@ -9,7 +9,7 @@ import type { AlertLevel } from '@/lib/types';
 import { analyzeVideoFrame } from '@/ai/flows/analyze-video-frame';
 import { cn } from '@/lib/utils';
 
-const FRAME_CAPTURE_INTERVAL = 2000; // 2 seconds
+const FRAME_CAPTURE_INTERVAL = 500; // 0.5 seconds
 const THREAT_COOLDOWN = 10000; // 10 seconds
 
 interface CameraFeedProps {
