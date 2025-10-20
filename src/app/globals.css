@@ -54,13 +54,13 @@ body {
     --card-foreground: 220 20% 92%;
     --popover: 223 33% 15%;
     --popover-foreground: 220 20% 92%;
-    --primary: 210 80% 70%;
-    --primary-foreground: 210 100% 15%;
+    --primary: 220 25% 26%; /* #2E3B55 */
+    --primary-foreground: 220 20% 92%;
     --secondary: 220 39% 26%; /* #2E3B55 */
     --secondary-foreground: 220 20% 92%;
     --muted: 220 30% 23%;
     --muted-foreground: 220 15% 55%;
-    --accent: 220 30% 39%; /* #465A80 */
+    --accent: 220 25% 39%; /* #465A80 */
     --accent-foreground: 220 20% 92%;
     --destructive: 0 63% 50%;
     --destructive-foreground: 0 0% 98%;
