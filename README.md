@@ -1,5 +1,4 @@
 # 🛡️ SafeCity — AI-Powered Personal Safety Web App  
-**Version:** 0.5 (Half Submission)  
 **Status:** Core Features Implemented — Backend, Sensor Integration, and Alert System Prototyped
 
 ---
@@ -131,15 +130,6 @@ TWILIO_PHONE_NUMBER=+1234567890
 
 ---
 
-## 📅 Next Phase Goals (Full Submission)
-✅ Add cloud-based risk mapping dataset integration.  
-✅ Implement full motion sensor fusion using gyroscope & accelerometer.  
-✅ Develop user management & emergency contact dashboard.  
-✅ Add cross-platform compatibility (PWA + Android WebView wrapper).  
-✅ Optimize AI inference pipeline for on-device efficiency.  
-
----
-
 ## 🧾 License
 MIT License © 2025 SafeCity Developers Team
 
@@ -151,5 +141,6 @@ MIT License © 2025 SafeCity Developers Team
 - **Backend & Infrastructure:** Sousnigdho Das
 - **UI/UX Designer:** Shreeya Banerjee
 - **Tester:** Pranav Sharma
+- **App Developer:** Cynthia Pachal
 
 **SafeCity — Empowering safety through real-time AI.**
