@@ -121,7 +121,7 @@ TWILIO_PHONE_NUMBER=+1234567890
 
 ---
 
-## 🧪 Current Limitations (Half Submission)
+## 🧪 Current Limitations
 - Emotion detection optimized for daylight; poor accuracy in low light.
 - Audio model lacks multi-language distress detection.
 - Background motion sensing partially implemented.
