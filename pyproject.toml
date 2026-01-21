@@ -1,0 +1,42 @@
+[project]
+name = "safecity"
+version = "0.1.0"
+description = "AI-Powered Personal Safety Application"
+authors = [
+    {name = "SafeCity Team"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "firebase-admin",
+    "geocoder",
+    "genkit",
+    "google-genai",
+    "google-generativeai",
+    "kivy[base]",
+    "kivy_deps.angle ; sys_platform == 'win32'",
+    "kivy_deps.glew ; sys_platform == 'win32'",
+    "kivy_deps.sdl2 ; sys_platform == 'win32'",
+    "mediapipe",
+    "numpy",
+    "opencv-python-headless",
+    "plyer",
+    "pyaudio",
+    "python-dotenv",
+    "scipy",
+    "SpeechRecognition",
+    "streamlit",
+    "ultralytics",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "safecity"
+version = "0.1.0"
+description = "AI-Powered Personal Safety Application"
+authors = ["SafeCity Team"]
+readme = "README.md"
+packages = [{include = "safecity_core"}, {include = "safecity_kivy"}, {include = "safecity_streamlit"}]

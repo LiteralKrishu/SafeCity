@@ -1,0 +1,11 @@
+streamlit
+genkit
+google-genai
+python-dotenv
+opencv-python-headless
+mediapipe
+numpy
+pyaudio
+scipy
+geocoder
+

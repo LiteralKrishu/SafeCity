@@ -1,0 +1,26 @@
+{
+    "vision": {
+        "movement_threshold": 5000,
+        "threat_cooldown": 5.0,
+        "history_size": 30
+    },
+    "audio": {
+        "volume_threshold": 500,
+        "scream_freq_min": 2000,
+        "scream_freq_max": 5000,
+        "chunk_size": 1024,
+        "rate": 44100
+    },
+    "risk": {
+        "weights": {
+            "video_danger": 50,
+            "video_warning": 25,
+            "audio_scream": 40,
+            "motion_impact": 30,
+            "time_factor": 20
+        },
+        "thresholds": {
+            "high_risk": 80
+        }
+    }
+}
