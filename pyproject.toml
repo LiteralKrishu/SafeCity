@@ -27,6 +27,7 @@ dependencies = [
     "SpeechRecognition",
     "streamlit",
     "ultralytics",
+    "onnxruntime (>=1.23.2,<2.0.0)",
 ]
 
 [build-system]

@@ -11,12 +11,18 @@ import os
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+# Action recognition
+from safecity_core.vision.action_recognizer import get_action_recognizer, ActionResult
+
 @dataclass
 class DetectionResult:
     annotated_frame: np.ndarray
     threat_level: str  # SAFE, WARNING, DANGER
     message: str
     is_sneak_attack: bool
+    detected_action: Optional[str] = None
+    action_confidence: float = 0.0
+
 
 # Pose landmark indices (same as old PoseLandmark enum)
 class PoseLandmark:
@@ -57,6 +63,11 @@ class ThreatDetector:
         # Drawing specs
         self.landmark_color = (245, 117, 66)
         self.connection_color = (245, 66, 230)
+        
+        # Action Recognition
+        self.action_recognizer = get_action_recognizer()
+        self.last_action: Optional[ActionResult] = None
+
 
     def _get_model_path(self) -> str:
         """Get the path to the pose landmarker model."""
@@ -156,6 +167,8 @@ class ThreatDetector:
         result_message = ""
         threat_level = "SAFE"
         is_sneak_attack = False
+        detected_action = None
+        action_confidence = 0.0
 
         # Flip frame for mirror effect (optional, implies webcam usage)
         frame = cv2.flip(frame, 1)
@@ -187,14 +200,36 @@ class ThreatDetector:
                 cv2.putText(frame, "THREAT BEHIND YOU!", (50, 50),
                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
 
-        # 3. Motion Warning (if no sneak attack but significant movement)
+        # 3. Action Recognition
+        action_result = self.action_recognizer.process_frame(frame)
+        if action_result:
+            self.last_action = action_result
+            detected_action = action_result.action
+            action_confidence = action_result.confidence
+            
+            # Escalate threat level based on action
+            if action_result.is_dangerous and threat_level != "DANGER":
+                threat_level = "DANGER"
+                result_message = f"DANGEROUS ACTION: {action_result.action.upper()}!"
+                self.last_threat_time = time.time()
+                
+                # Draw visual warning for dangerous action
+                cv2.rectangle(frame, (0, 0), (w, h), (0, 0, 255), 10)
+                cv2.putText(frame, f"ACTION: {action_result.action.upper()}", (50, h - 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            elif action_result.action in self.action_recognizer.WARNING_ACTIONS:
+                if threat_level == "SAFE":
+                    threat_level = "WARNING"
+                    result_message = f"Activity: {action_result.action}"
+
+        # 4. Motion Warning (if no sneak attack but significant movement)
         if is_moving and threat_level == "SAFE":
             threat_level = "WARNING"
             result_message = "Motion Detected"
             # Draw Yellow Border
             cv2.rectangle(frame, (0,0), (w,h), (0, 255, 255), 5)
 
-        # 4. Persistence (Keep Red/Yellow alert active for a few seconds)
+        # 5. Persistence (Keep Red/Yellow alert active for a few seconds)
         if time.time() - self.last_threat_time < self.threat_cooldown:
             if threat_level == "SAFE": # Don't downgrade if we just detected something
                 threat_level = "WARNING"
@@ -203,5 +238,8 @@ class ThreatDetector:
             annotated_frame=frame,
             threat_level=threat_level,
             message=result_message,
-            is_sneak_attack=is_sneak_attack
+            is_sneak_attack=is_sneak_attack,
+            detected_action=detected_action,
+            action_confidence=action_confidence
         )
+
