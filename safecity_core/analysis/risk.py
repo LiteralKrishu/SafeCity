@@ -42,10 +42,8 @@ class RiskEngine:
         """
         Fuse all sensors into a 0-100 score + breakdown.
         """
-        # 1. Base Context (Location + Time)
-        hour = datetime.datetime.now().hour
-        is_night = hour < 6 or hour > 20
-        time_factor = 20 if is_night else 0
+        # 1. Base Context (Location + Time) - TIME EXCLUDED FROM RISK ASSESSMENT
+        time_factor = 0
         
         # 2. Dynamic Sensors
         # Load Config
@@ -60,10 +58,7 @@ class RiskEngine:
         motion_score = weights.get("motion_impact", 30) if gyro_abnormal else 0
         time_factor_val = weights.get("time_factor", 20)
         
-        # Adjustment for time factor if it was calculated using hardcode above, logic:
-        # We calculated 'time_factor' variable earlier, but let's override the weight if config exists
-        if is_night:
-             time_factor = time_factor_val
+        # time_factor weights are ignored
         
         base_score = self.location_risk_score + time_factor
         
@@ -74,7 +69,6 @@ class RiskEngine:
         # Breakdown for UI
         breakdown = {
             "Location Context": self.location_risk_score,
-            "Time Factor": time_factor,
             "Visual Threat": video_score,
             "Audio Analysis": audio_score,
             "Motion/Impact": motion_score

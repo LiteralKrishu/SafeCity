@@ -147,11 +147,11 @@ class RiskEngine:
                 confidence = 0.7
                 message = f"Activity detected: {detected_action}"
                 
-            elif gyro_abnormal and self._is_night_time():
-                triggers.append("Abnormal Motion at Night")
+            elif gyro_abnormal:
+                triggers.append("Abnormal Motion Detected")
                 level = RiskLevel.WARNING
                 confidence = 0.7
-                message = "Unusual movement detected at night."
+                message = "Unusual movement detected."
                 
             elif video_threat_level == "WARNING":
                 triggers.append("Motion Detected (Unconfirmed)")
@@ -161,12 +161,7 @@ class RiskEngine:
         
         # --- WATCH_MODE TRIGGERS ---
         if level.value < RiskLevel.WATCH_MODE.value:
-            if self._is_night_time():
-                triggers.append("Night Time")
-                level = RiskLevel.WATCH_MODE
-                confidence = 0.8
-                message = "Night mode active."
-            elif self._is_high_crime_zone():
+            if self._is_high_crime_zone():
                 triggers.append(f"High Crime Zone ({self.current_city})")
                 level = RiskLevel.WATCH_MODE
                 confidence = 0.6
