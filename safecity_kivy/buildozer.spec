@@ -60,6 +60,21 @@ android.api = 33
 # (int) Minimum API your APK will support.
 android.minapi = 21
 
+# (str) Android NDK version to use
+android.ndk = 25b
+
+# (str) Android SDK version to use (leave blank for automatic detection)
+# android.sdk = 
+
+# (str) Android build-tools version to use
+android.build_tools_version = 34.0.0
+
+# (bool) Use the system-provided Android SDK/NDK directories
+android.accept_sdk_license = True
+
+# (bool) Accept sdk licenses automatically
+android.skip_sdkmanager = False
+
 [buildozer]
 
 # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
