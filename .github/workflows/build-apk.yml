@@ -50,7 +50,7 @@ jobs:
           pkg-config \
           libncurses5-dev \
           libncursesw5-dev \
-          libtinfo5 \
+          libtinfo-dev \
           cmake \
           libffi-dev \
           libssl-dev
