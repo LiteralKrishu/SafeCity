@@ -140,46 +140,50 @@ class ActionRecognizer:
         ADJUSTED: Much higher thresholds to reduce false positives.
         Only truly violent shaking/running will trigger.
         """
-        if len(self.motion_history) < 10:
+        # Require at least 15 frames of history for stable detection (was 10)
+        if len(self.motion_history) < 15:
             return ActionResult(action="unknown", confidence=0.0, is_dangerous=False)
         
-        recent_motion = list(self.motion_history)[-10:]
+        recent_motion = list(self.motion_history)[-15:]
         avg_motion = np.mean(recent_motion)
         max_motion = np.max(recent_motion)
         motion_variance = np.var(recent_motion)
         
+        # Count how many recent frames had high motion (for sustained detection)
+        high_motion_frames = sum(1 for m in recent_motion if m > 0.20)
+        
         # VIOLENT SHAKING: Extremely high, erratic motion -> potential danger
-        # Threshold increased from 0.15 to 0.35 (more than doubled)
-        if avg_motion > 0.35 and motion_variance > 0.03:
+        # Requires sustained high motion (at least 8 of 15 frames) + high variance
+        if avg_motion > 0.45 and motion_variance > 0.04 and high_motion_frames >= 8:
             return ActionResult(
                 action="violent_shaking",
-                confidence=min(0.8, avg_motion * 2),
+                confidence=min(0.8, avg_motion * 1.5),
                 is_dangerous=True
             )
         
-        # FAST RUNNING: Sustained very high motion
-        # Threshold increased from 0.08 to 0.25
-        if avg_motion > 0.25 and motion_variance < 0.02:
+        # FAST RUNNING: Sustained very high motion with consistency
+        # Requires at least 10 sustained high motion frames
+        if avg_motion > 0.30 and motion_variance < 0.02 and high_motion_frames >= 10:
             return ActionResult(
                 action="running",
                 confidence=0.7,
-                is_dangerous=True  # Running could indicate fleeing danger
+                is_dangerous=False  # Running alone is not dangerous, just a warning
             )
         
         # SUDDEN IMPACT: Very sudden spike in motion -> fall or phone knocked
-        # Threshold increased from 0.25 to 0.40
-        if max_motion > 0.40 and avg_motion < 0.15:
+        # Requires a very high spike with sustained low motion before
+        if max_motion > 0.50 and avg_motion < 0.12:
             return ActionResult(
                 action="impact",
                 confidence=0.6,
                 is_dangerous=True
             )
         
-        # Normal walking/movement - not dangerous
-        if avg_motion > 0.05:
+        # Normal walking/movement - not dangerous, higher threshold
+        if avg_motion > 0.08:
             return ActionResult(
                 action="walking",
-                confidence=0.6,
+                confidence=0.5,
                 is_dangerous=False
             )
         

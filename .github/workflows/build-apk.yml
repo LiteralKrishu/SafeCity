@@ -27,8 +27,14 @@ jobs:
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
       with:
-        packages: 'build-tools;33.0.0 platforms;android-33 platform-tools'
+        packages: 'build-tools;34.0.0 platforms;android-34 platform-tools ndk;25.2.9519653'
         accept-android-sdk-licenses: true
+    
+    - name: Install AIDL and additional SDK components
+      run: |
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;34.0.0" "platforms;android-34" || true
+        # Verify AIDL is available
+        ls -la $ANDROID_HOME/build-tools/34.0.0/aidl || echo "AIDL location check"
     
     - name: Install dependencies
       run: |

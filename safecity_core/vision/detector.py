@@ -217,17 +217,16 @@ class ThreatDetector:
                 cv2.rectangle(frame, (0, 0), (w, h), (0, 0, 255), 10)
                 cv2.putText(frame, f"ACTION: {action_result.action.upper()}", (50, h - 50),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            elif action_result.action in self.action_recognizer.WARNING_ACTIONS:
+            # Only escalate to WARNING for running (not other warning actions)
+            # to reduce false positives from normal walking
+            elif action_result.action == "running" and action_result.confidence > 0.65:
                 if threat_level == "SAFE":
                     threat_level = "WARNING"
                     result_message = f"Activity: {action_result.action}"
+                    cv2.rectangle(frame, (0, 0), (w, h), (0, 255, 255), 5)
 
-        # 4. Motion Warning (if no sneak attack but significant movement)
-        if is_moving and threat_level == "SAFE":
-            threat_level = "WARNING"
-            result_message = "Motion Detected"
-            # Draw Yellow Border
-            cv2.rectangle(frame, (0,0), (w,h), (0, 255, 255), 5)
+        # 4. Motion Detection - tracked internally but no alert
+        # (Removed motion-based WARNING to reduce false positives from minor movements)
 
         # 5. Persistence (Keep Red/Yellow alert active for a few seconds)
         if time.time() - self.last_threat_time < self.threat_cooldown:
