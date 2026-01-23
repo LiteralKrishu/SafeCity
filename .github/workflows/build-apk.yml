@@ -21,14 +21,14 @@ jobs:
     - name: Set up Java
       uses: actions/setup-java@v4
       with:
-        java-version: '11'
+        java-version: '17'
         distribution: 'temurin'
     
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
       with:
-        api-level: 33
-        build-tools: 33.0.0
+        packages: 'build-tools;33.0.0 platforms;android-33'
+        accept-android-sdk-licenses: true
     
     - name: Install dependencies
       run: |
