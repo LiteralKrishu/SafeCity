@@ -9,15 +9,21 @@ package.name = safecity_simple
 # (str) Package domain (needed for android/ios packaging)
 package.domain = org.safecity
 
+# (str) Application version
+version = 1.0
+
 # (str) Source code where the main.py live
 source.dir = .
 
 # (str) Source code filename (let's use that one)
 source.include_exts = py,png,jpg,kv,atlas,tflite
 
+# (list) Source code to include from assets folder
+source.include_patterns = assets/*
+
 # (list) Application requirements
 # Comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy,plyer,opencv,numpy,android,jnius
+requirements = python3,kivy,plyer,opencv,numpy,android,jnius,tensorflow-lite,firebase-admin,geocoder,google-generativeai,mediapipe,scipy,SpeechRecognition,ultralytics,onnxruntime,pyaudio
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes

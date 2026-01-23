@@ -168,6 +168,23 @@ files = [
 ]
 
 [[package]]
+name = "buildozer"
+version = "1.5.0"
+description = "Generic Python packager for Android / iOS and Desktop"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "buildozer-1.5.0-py3-none-any.whl", hash = "sha256:987cc4363c4834893bbf1c32547b8afd953a16b92d788a654ca5f89ba197d9ea"},
+    {file = "buildozer-1.5.0.tar.gz", hash = "sha256:ec685a53f88789607a43e629f9e25992c9be8824518b00d77ce3092ff7deca75"},
+]
+
+[package.dependencies]
+pexpect = "*"
+sh = "*"
+virtualenv = "*"
+
+[[package]]
 name = "cachecontrol"
 version = "0.14.4"
 description = "httplib2 caching for requests"
@@ -718,6 +735,55 @@ docs = ["ipython", "matplotlib", "numpydoc", "sphinx"]
 tests = ["pytest", "pytest-cov", "pytest-xdist"]
 
 [[package]]
+name = "cython"
+version = "3.2.4"
+description = "The Cython compiler for writing C extensions in the Python language."
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "cython-3.2.4-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:02cb0cc0f23b9874ad262d7d2b9560aed9c7e2df07b49b920bda6f2cc9cb505e"},
+    {file = "cython-3.2.4-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f136f379a4a54246facd0eb6f1ee15c3837cb314ce87b677582ec014db4c6845"},
+    {file = "cython-3.2.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:35ab0632186057406ec729374c737c37051d2eacad9d515d94e5a3b3e58a9b02"},
+    {file = "cython-3.2.4-cp310-cp310-win_amd64.whl", hash = "sha256:ca2399dc75796b785f74fb85c938254fa10c80272004d573c455f9123eceed86"},
+    {file = "cython-3.2.4-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:ff9af2134c05e3734064808db95b4dd7341a39af06e8945d05ea358e1741aaed"},
+    {file = "cython-3.2.4-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:67922c9de058a0bfb72d2e75222c52d09395614108c68a76d9800f150296ddb3"},
+    {file = "cython-3.2.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b362819d155fff1482575e804e43e3a8825332d32baa15245f4642022664a3f4"},
+    {file = "cython-3.2.4-cp311-cp311-win_amd64.whl", hash = "sha256:1a64a112a34ec719b47c01395647e54fb4cf088a511613f9a3a5196694e8e382"},
+    {file = "cython-3.2.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:64d7f71be3dd6d6d4a4c575bb3a4674ea06d1e1e5e4cd1b9882a2bc40ed3c4c9"},
+    {file = "cython-3.2.4-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:869487ea41d004f8b92171f42271fbfadb1ec03bede3158705d16cd570d6b891"},
+    {file = "cython-3.2.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:55b6c44cd30821f0b25220ceba6fe636ede48981d2a41b9bbfe3c7902ce44ea7"},
+    {file = "cython-3.2.4-cp312-cp312-win_amd64.whl", hash = "sha256:767b143704bdd08a563153448955935844e53b852e54afdc552b43902ed1e235"},
+    {file = "cython-3.2.4-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:28e8075087a59756f2d059273184b8b639fe0f16cf17470bd91c39921bc154e0"},
+    {file = "cython-3.2.4-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:03893c88299a2c868bb741ba6513357acd104e7c42265809fd58dce1456a36fc"},
+    {file = "cython-3.2.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f81eda419b5ada7b197bbc3c5f4494090e3884521ffd75a3876c93fbf66c9ca8"},
+    {file = "cython-3.2.4-cp313-cp313-win_amd64.whl", hash = "sha256:83266c356c13c68ffe658b4905279c993d8a5337bb0160fa90c8a3e297ea9a2e"},
+    {file = "cython-3.2.4-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:d4b4fd5332ab093131fa6172e8362f16adef3eac3179fd24bbdc392531cb82fa"},
+    {file = "cython-3.2.4-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e3b5ac54e95f034bc7fb07313996d27cbf71abc17b229b186c1540942d2dc28e"},
+    {file = "cython-3.2.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:90f43be4eaa6afd58ce20d970bb1657a3627c44e1760630b82aa256ba74b4acb"},
+    {file = "cython-3.2.4-cp314-cp314-win_amd64.whl", hash = "sha256:983f9d2bb8a896e16fa68f2b37866ded35fa980195eefe62f764ddc5f9f5ef8e"},
+    {file = "cython-3.2.4-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:55eb425c0baf1c8a46aa4424bc35b709db22f3c8a1de33adb3ecb8a3d54ea42a"},
+    {file = "cython-3.2.4-cp38-cp38-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f583cad7a7eed109f0babb5035e92d0c1260598f53add626a8568b57246b62c3"},
+    {file = "cython-3.2.4-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:72e6c0bbd978e2678b45351395f6825b9b8466095402eae293f4f7a73e9a3e85"},
+    {file = "cython-3.2.4-cp38-cp38-win_amd64.whl", hash = "sha256:14dae483ca2838b287085ff98bc206abd7a597b7bb16939a092f8e84d9062842"},
+    {file = "cython-3.2.4-cp39-abi3-macosx_10_9_x86_64.whl", hash = "sha256:36bf3f5eb56d5281aafabecbaa6ed288bc11db87547bba4e1e52943ae6961ccf"},
+    {file = "cython-3.2.4-cp39-abi3-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:6d5267f22b6451eb1e2e1b88f6f78a2c9c8733a6ddefd4520d3968d26b824581"},
+    {file = "cython-3.2.4-cp39-abi3-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:3b6e58f73a69230218d5381817850ce6d0da5bb7e87eb7d528c7027cbba40b06"},
+    {file = "cython-3.2.4-cp39-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:e71efb20048358a6b8ec604a0532961c50c067b5e63e345e2e359fff72feaee8"},
+    {file = "cython-3.2.4-cp39-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:28b1e363b024c4b8dcf52ff68125e635cb9cb4b0ba997d628f25e32543a71103"},
+    {file = "cython-3.2.4-cp39-abi3-musllinux_1_2_i686.whl", hash = "sha256:31a90b4a2c47bb6d56baeb926948348ec968e932c1ae2c53239164e3e8880ccf"},
+    {file = "cython-3.2.4-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:e65e4773021f8dc8532010b4fbebe782c77f9a0817e93886e518c93bd6a44e9d"},
+    {file = "cython-3.2.4-cp39-abi3-win32.whl", hash = "sha256:2b1f12c0e4798293d2754e73cd6f35fa5bbdf072bdc14bc6fc442c059ef2d290"},
+    {file = "cython-3.2.4-cp39-abi3-win_arm64.whl", hash = "sha256:3b8e62049afef9da931d55de82d8f46c9a147313b69d5ff6af6e9121d545ce7a"},
+    {file = "cython-3.2.4-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:f8d685a70bce39acc1d62ec3916d9b724b5ef665b0ce25ae55e1c85ee09747fc"},
+    {file = "cython-3.2.4-cp39-cp39-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ca578c9cb872c7ecffbe14815dc4590a003bc13339e90b2633540c7e1a252839"},
+    {file = "cython-3.2.4-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b84d4e3c875915545f77c88dba65ad3741afd2431e5cdee6c9a20cefe6905647"},
+    {file = "cython-3.2.4-cp39-cp39-win_amd64.whl", hash = "sha256:fdfdd753ad7e18e5092b413e9f542e8d28b8a08203126090e1c15f7783b7fe57"},
+    {file = "cython-3.2.4-py3-none-any.whl", hash = "sha256:732fc93bc33ae4b14f6afaca663b916c2fdd5dcbfad7114e17fb2434eeaea45c"},
+    {file = "cython-3.2.4.tar.gz", hash = "sha256:84226ecd313b233da27dc2eb3601b4f222b8209c3a7216d8733b031da1dc64e6"},
+]
+
+[[package]]
 name = "decorator"
 version = "5.2.1"
 description = "Decorators for Humans"
@@ -727,6 +793,18 @@ groups = ["main"]
 files = [
     {file = "decorator-5.2.1-py3-none-any.whl", hash = "sha256:d316bb415a2d9e2d2b3abcc4084c6502fc09240e292cd76a76afc106a1c8e04a"},
     {file = "decorator-5.2.1.tar.gz", hash = "sha256:65f266143752f734b0a7cc83c46f4618af75b8c5911b00ccb61d0ac9b6da0360"},
+]
+
+[[package]]
+name = "distlib"
+version = "0.4.0"
+description = "Distribution utilities"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "distlib-0.4.0-py2.py3-none-any.whl", hash = "sha256:9659f7d87e46584a30b5780e43ac7a2143098441670ff0a49d5f9034c54a6c16"},
+    {file = "distlib-0.4.0.tar.gz", hash = "sha256:feec40075be03a04501a973d81f633735b4b69f98b05450592310c0f401a4e0d"},
 ]
 
 [[package]]
@@ -3112,6 +3190,21 @@ files = [
 playground = ["rich"]
 
 [[package]]
+name = "pexpect"
+version = "4.9.0"
+description = "Pexpect allows easy control of interactive console applications."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "pexpect-4.9.0-py2.py3-none-any.whl", hash = "sha256:7236d1e080e4936be2dc3e326cec0af72acf9212a7e1d060210e70a47e253523"},
+    {file = "pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f"},
+]
+
+[package.dependencies]
+ptyprocess = ">=0.5"
+
+[[package]]
 name = "pillow"
 version = "10.4.0"
 description = "Python Imaging Library (Fork)"
@@ -3208,6 +3301,23 @@ mic = ["olefile"]
 tests = ["check-manifest", "coverage", "defusedxml", "markdown2", "olefile", "packaging", "pyroma", "pytest", "pytest-cov", "pytest-timeout"]
 typing = ["typing-extensions ; python_version < \"3.10\""]
 xmp = ["defusedxml"]
+
+[[package]]
+name = "platformdirs"
+version = "4.5.1"
+description = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "platformdirs-4.5.1-py3-none-any.whl", hash = "sha256:d03afa3963c806a9bed9d5125c8f4cb2fdaf74a55ab60e5d59b3fde758104d31"},
+    {file = "platformdirs-4.5.1.tar.gz", hash = "sha256:61d5cdcc6065745cdd94f0f878977f8de9437be93de97c1c12f853c9c0cdcbda"},
+]
+
+[package.extras]
+docs = ["furo (>=2025.9.25)", "proselint (>=0.14)", "sphinx (>=8.2.3)", "sphinx-autodoc-typehints (>=3.2)"]
+test = ["appdirs (==1.4.4)", "covdefaults (>=2.3)", "pytest (>=8.4.2)", "pytest-cov (>=7)", "pytest-mock (>=3.15.1)"]
+type = ["mypy (>=1.18.2)"]
 
 [[package]]
 name = "plyer"
@@ -3363,6 +3473,18 @@ files = [
 [package.extras]
 dev = ["abi3audit", "black", "check-manifest", "coverage", "packaging", "psleak", "pylint", "pyperf", "pypinfo", "pytest", "pytest-cov", "pytest-instafail", "pytest-xdist", "requests", "rstcheck", "ruff", "setuptools", "sphinx", "sphinx_rtd_theme", "toml-sort", "twine", "validate-pyproject[all]", "virtualenv", "vulture", "wheel"]
 test = ["psleak", "pytest", "pytest-instafail", "pytest-xdist", "setuptools"]
+
+[[package]]
+name = "ptyprocess"
+version = "0.7.0"
+description = "Run a subprocess in a pseudo terminal"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "ptyprocess-0.7.0-py2.py3-none-any.whl", hash = "sha256:4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35"},
+    {file = "ptyprocess-0.7.0.tar.gz", hash = "sha256:5c5d0a3b48ceee0b48485e0c26037c0acd7d29765ca3fbb5cb3831d347423220"},
+]
 
 [[package]]
 name = "pyarrow"
@@ -4217,6 +4339,31 @@ test = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "ini2toml[lite] (>=
 type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.develop (>=7.21) ; sys_platform != \"cygwin\"", "mypy (==1.14.*)", "pytest-mypy"]
 
 [[package]]
+name = "sh"
+version = "1.14.3"
+description = "Python subprocess replacement"
+optional = false
+python-versions = "*"
+groups = ["main"]
+markers = "python_version >= \"3.14\""
+files = [
+    {file = "sh-1.14.3.tar.gz", hash = "sha256:e4045b6c732d9ce75d571c79f5ac2234edd9ae4f5fa9d59b09705082bdca18c7"},
+]
+
+[[package]]
+name = "sh"
+version = "2.2.2"
+description = "Python subprocess replacement"
+optional = false
+python-versions = "<4.0,>=3.8.1"
+groups = ["main"]
+markers = "python_version <= \"3.13\""
+files = [
+    {file = "sh-2.2.2-py3-none-any.whl", hash = "sha256:e0b15b4ae8ffcd399bc8ffddcbd770a43c7a70a24b16773fbb34c001ad5d52af"},
+    {file = "sh-2.2.2.tar.gz", hash = "sha256:653227a7c41a284ec5302173fbc044ee817c7bad5e6e4d8d55741b9aeb9eb65b"},
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 description = "Python 2 and 3 compatibility utilities"
@@ -4939,6 +5086,27 @@ h11 = ">=0.8"
 standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "uvloop (>=0.15.1) ; sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\"", "watchfiles (>=0.13)", "websockets (>=10.4)"]
 
 [[package]]
+name = "virtualenv"
+version = "20.36.1"
+description = "Virtual Python Environment builder"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "virtualenv-20.36.1-py3-none-any.whl", hash = "sha256:575a8d6b124ef88f6f51d56d656132389f961062a9177016a50e4f507bbcc19f"},
+    {file = "virtualenv-20.36.1.tar.gz", hash = "sha256:8befb5c81842c641f8ee658481e42641c68b5eab3521d8e092d18320902466ba"},
+]
+
+[package.dependencies]
+distlib = ">=0.3.7,<1"
+filelock = {version = ">=3.20.1,<4", markers = "python_version >= \"3.10\""}
+platformdirs = ">=3.9.1,<5"
+
+[package.extras]
+docs = ["furo (>=2023.7.26)", "proselint (>=0.13)", "sphinx (>=7.1.2,!=7.3)", "sphinx-argparse (>=0.4)", "sphinxcontrib-towncrier (>=0.2.1a0)", "towncrier (>=23.6)"]
+test = ["covdefaults (>=2.3)", "coverage (>=7.2.7)", "coverage-enable-subprocess (>=1)", "flaky (>=3.7)", "packaging (>=23.1)", "pytest (>=7.4)", "pytest-env (>=0.8.2)", "pytest-freezer (>=0.4.8) ; platform_python_implementation == \"PyPy\" or platform_python_implementation == \"GraalVM\" or platform_python_implementation == \"CPython\" and sys_platform == \"win32\" and python_version >= \"3.13\"", "pytest-mock (>=3.11.1)", "pytest-randomly (>=3.12)", "pytest-timeout (>=2.1)", "setuptools (>=68)", "time-machine (>=2.10) ; platform_python_implementation == \"CPython\""]
+
+[[package]]
 name = "watchdog"
 version = "6.0.0"
 description = "Filesystem events monitoring"
@@ -5084,4 +5252,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "7fea5739dfd268603a15246d882fca3038f41104f6abf6ebfe1462d4bd4814ad"
+content-hash = "384017091593dad8cbcd676c1d8b6aa25cea9d600cb39385bf256c2b9aac6dce"
