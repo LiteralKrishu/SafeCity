@@ -1,10 +1,10 @@
 [app]
 
 # (str) Title of your application
-title = SafeCity
+title = SafeCity Simple
 
 # (str) Package name
-package.name = safecity
+package.name = safecity_simple
 
 # (str) Package domain (needed for android/ios packaging)
 package.domain = org.safecity
