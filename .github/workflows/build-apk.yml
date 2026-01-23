@@ -30,11 +30,6 @@ jobs:
         packages: 'build-tools;33.0.0 platforms;android-33 platform-tools'
         accept-android-sdk-licenses: true
     
-    - name: Install additional Android tools
-      run: |
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.0" "platform-tools"
-      shell: bash
-    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -49,12 +44,10 @@ jobs:
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        PATH: /usr/local/lib/android/sdk/build-tools/33.0.0:$PATH
       run: |
-        # Copy model files to assets
         mkdir -p assets
         cp ../assets/models/* assets/ 2>/dev/null || true
-        buildozer android debug
+        python -m buildozer android debug
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
