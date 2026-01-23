@@ -27,8 +27,13 @@ jobs:
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
       with:
-        packages: 'build-tools;33.0.0 platforms;android-33'
+        packages: 'build-tools;33.0.0 platforms;android-33 platform-tools'
         accept-android-sdk-licenses: true
+    
+    - name: Install additional Android tools
+      run: |
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.0" "platform-tools"
+      shell: bash
     
     - name: Install dependencies
       run: |
@@ -42,8 +47,9 @@ jobs:
     - name: Build APK
       working-directory: ./safecity_kivy
       env:
-        ANDROID_HOME: ${{ env.ANDROID_HOME }}
-        ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+        ANDROID_HOME: /usr/local/lib/android/sdk
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        PATH: /usr/local/lib/android/sdk/build-tools/33.0.0:$PATH
       run: |
         # Copy model files to assets
         mkdir -p assets
