@@ -1,140 +1,228 @@
 """
-Camera View Widget with Threat Detection and Action Recognition
+CameraView - Kivy Widget for OpenCV Camera Integration with Threat Detection.
 
-Provides real-time video feed with:
-- Sneak attack detection (MediaPipe pose)
-- Action recognition (ONNX/motion heuristics)
+This module provides a Kivy Image widget that captures video frames from 
+a camera using OpenCV, runs threat detection via ThreatDetector, and 
+displays the annotated frames in real-time.
 """
 
-from kivy.uix.image import Image
-from kivy.graphics.texture import Texture
-from kivy.clock import Clock, mainthread
-from kivy.properties import ObjectProperty, StringProperty, BooleanProperty, NumericProperty
 import cv2
+import base64
 import numpy as np
-import threading
-import time
+from io import BytesIO
+from PIL import Image
+
+from kivy.uix.image import Image as KivyImage
+from kivy.properties import StringProperty, NumericProperty, ObjectProperty
+from kivy.clock import Clock
+from kivy.graphics.texture import Texture
+
 from safecity_core.vision.detector import ThreatDetector
-from safecity_core.vision.action_recognizer import get_action_recognizer
 
 
-class CameraView(Image):
+class CameraView(KivyImage):
     """
-    Camera widget with integrated threat and action detection.
-    """
-    detector = ObjectProperty(None)
-    threat_level = StringProperty("SAFE")
-    message = StringProperty("")
+    A Kivy widget that displays live camera feed with threat detection overlay.
     
-    # New: Action recognition properties
-    detected_action = StringProperty("")
+    Properties:
+        threat_level (str): Current threat level ("SAFE", "WARNING", "DANGER")
+        detected_action (str): Currently detected action (e.g., "punch", "kick")
+        is_running (bool): Whether the camera is currently capturing
+    """
+    
+    # Kivy Properties for data binding
+    threat_level = StringProperty("SAFE")
+    detected_action = StringProperty("None")
     action_confidence = NumericProperty(0.0)
-    is_action_dangerous = BooleanProperty(False)
+    is_sneak_attack = ObjectProperty(False)
     
     def __init__(self, **kwargs):
-        super(CameraView, self).__init__(**kwargs)
-        self.capture = None
-        self.detector = ThreatDetector()
-        self.action_recognizer = get_action_recognizer()
-        self.fps = 30
-        self.is_active = False
-        self.thread = None
-        self.stop_event = threading.Event()
+        super().__init__(**kwargs)
         
-        # Store last frame for SOS broadcast
-        self.last_frame = None
-        self.last_frame_b64 = ""
-
-    def start(self, camera_index=0):
-        """Start the camera feed and processing."""
-        if not self.is_active:
-            self.capture = cv2.VideoCapture(camera_index)
-            self.is_active = True
-            self.stop_event.clear()
-            self.thread = threading.Thread(target=self.process_video_loop)
-            self.thread.daemon = True
-            self.thread.start()
-
+        self.capture = None
+        self.detector = None
+        self.is_running = False
+        self.camera_index = 0
+        self._last_frame_b64 = ""
+        self._update_event = None
+        
+        # Initialize with a placeholder texture
+        self._create_placeholder()
+    
+    def _create_placeholder(self):
+        """Create a dark placeholder texture when camera is not active."""
+        # Create a dark gray placeholder image
+        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+        placeholder[:] = (30, 30, 30)  # Dark gray
+        
+        # Add text
+        cv2.putText(
+            placeholder, 
+            "Camera Off", 
+            (220, 240),
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            1.2, 
+            (100, 100, 100), 
+            2
+        )
+        
+        self._update_texture(placeholder)
+    
+    def _update_texture(self, frame: np.ndarray):
+        """Convert an OpenCV frame to a Kivy texture and update the widget."""
+        # Convert BGR to RGB
+        if len(frame.shape) == 3 and frame.shape[2] == 3:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        else:
+            frame_rgb = frame
+        
+        # Flip vertically for Kivy (Kivy uses bottom-left origin)
+        frame_flipped = cv2.flip(frame_rgb, 0)
+        
+        # Create texture
+        h, w = frame_flipped.shape[:2]
+        texture = Texture.create(size=(w, h), colorfmt='rgb')
+        texture.blit_buffer(frame_flipped.tobytes(), colorfmt='rgb', bufferfmt='ubyte')
+        
+        self.texture = texture
+    
+    def start(self, camera_index: int = 0):
+        """
+        Start the camera capture and threat detection.
+        
+        Args:
+            camera_index: Index of the camera to use (0 = default webcam)
+        """
+        if self.is_running:
+            print("[CameraView] Already running, ignoring start()")
+            return
+        
+        self.camera_index = camera_index
+        
+        # Initialize video capture
+        print(f"[CameraView] Opening camera index {camera_index}...")
+        self.capture = cv2.VideoCapture(camera_index)
+        
+        if not self.capture.isOpened():
+            print(f"[CameraView] ERROR: Failed to open camera {camera_index}")
+            self._show_error("Camera Error")
+            return
+        
+        # Set resolution (optional, adjust as needed)
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        # Initialize threat detector
+        print("[CameraView] Initializing ThreatDetector...")
+        try:
+            self.detector = ThreatDetector()
+        except Exception as e:
+            print(f"[CameraView] ERROR: Failed to initialize ThreatDetector: {e}")
+            self.detector = None
+        
+        self.is_running = True
+        
+        # Schedule frame updates at ~30 FPS
+        print("[CameraView] Starting frame updates...")
+        self._update_event = Clock.schedule_interval(self._update_frame, 1.0 / 30.0)
+    
     def stop(self):
-        """Stop the camera feed."""
-        self.is_active = False
-        self.stop_event.set()
-        if self.thread:
-            self.thread.join(timeout=1.0)
-            self.thread = None
+        """Stop the camera capture and release resources."""
+        if not self.is_running:
+            return
+        
+        self.is_running = False
+        
+        # Cancel scheduled updates
+        if self._update_event:
+            self._update_event.cancel()
+            self._update_event = None
+        
+        # Release camera
         if self.capture:
             self.capture.release()
             self.capture = None
-
-    def process_video_loop(self):
-        """Background video processing loop."""
-        while not self.stop_event.is_set() and self.capture and self.capture.isOpened():
-            ret, frame = self.capture.read()
-            if ret:
-                # 1. Threat Detection (Pose + Sneak Attack)
+        
+        # Reset properties
+        self.threat_level = "SAFE"
+        self.detected_action = "None"
+        self.action_confidence = 0.0
+        self.is_sneak_attack = False
+        
+        # Show placeholder
+        self._create_placeholder()
+        
+        print("[CameraView] Stopped.")
+    
+    def _update_frame(self, dt):
+        """Called every frame to capture, process, and display."""
+        if not self.is_running or not self.capture:
+            return
+        
+        ret, frame = self.capture.read()
+        if not ret:
+            print("[CameraView] Failed to read frame")
+            return
+        
+        # Process frame through threat detector
+        if self.detector:
+            try:
                 result = self.detector.process_frame(frame)
                 
-                # 2. Action Recognition
-                action_result = self.action_recognizer.process_frame(result.annotated_frame)
+                # Update properties for data binding
+                self.threat_level = result.threat_level
+                self.detected_action = result.detected_action or "None"
+                self.action_confidence = result.action_confidence
+                self.is_sneak_attack = result.is_sneak_attack
                 
-                action_name = ""
-                action_conf = 0.0
-                action_dangerous = False
-                
-                if action_result:
-                    action_name = action_result.action
-                    action_conf = action_result.confidence
-                    action_dangerous = action_result.is_dangerous
-                
-                # 3. Store frame for potential SOS
-                self.last_frame = result.annotated_frame.copy()
-                
-                # Encode to base64 for broadcast panel
-                try:
-                    _, encoded = cv2.imencode('.jpg', result.annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                    import base64
-                    self.last_frame_b64 = base64.b64encode(encoded).decode('utf-8')
-                except Exception:
-                    pass
-                
-                # 4. Update UI on Main Thread
-                self.update_ui(
-                    result.annotated_frame,
-                    result.threat_level,
-                    result.message,
-                    action_name,
-                    action_conf,
-                    action_dangerous
-                )
-            
-            # Limit FPS
-            time.sleep(1.0 / self.fps)
-
-    @mainthread
-    def update_ui(self, frame, threat_level, message, action, action_conf, action_dangerous):
-        """Update UI properties on main thread."""
-        # Update threat properties
-        self.threat_level = threat_level
-        self.message = message
+                # Use annotated frame
+                display_frame = result.annotated_frame
+            except Exception as e:
+                print(f"[CameraView] Detection error: {e}")
+                display_frame = frame
+        else:
+            display_frame = frame
         
-        # Update action properties
-        self.detected_action = action
-        self.action_confidence = action_conf
-        self.is_action_dangerous = action_dangerous
-        
-        # Escalate threat level if dangerous action detected
-        if action_dangerous and self.threat_level != "DANGER":
-            self.threat_level = "DANGER"
-            self.message = f"DANGEROUS ACTION: {action.upper()}"
+        # Store frame as base64 for potential SOS broadcast
+        self._store_frame_b64(display_frame)
         
         # Update texture
-        buf1 = cv2.flip(frame, 0)
-        buf = buf1.tobytes()
-        image_texture = Texture.create(
-            size=(frame.shape[1], frame.shape[0]), colorfmt='bgr')
-        image_texture.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
-        self.texture = image_texture
+        self._update_texture(display_frame)
+    
+    def _store_frame_b64(self, frame: np.ndarray):
+        """Store the current frame as base64 encoded JPEG for SOS broadcast."""
+        try:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(frame_rgb)
+            buffered = BytesIO()
+            pil_image.save(buffered, format="JPEG", quality=75)
+            self._last_frame_b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        except Exception:
+            pass
     
     def get_last_frame_b64(self) -> str:
-        """Get the last frame as base64 string for broadcast."""
-        return self.last_frame_b64
+        """
+        Get the last captured frame as a base64 encoded JPEG string.
+        Used for SOS broadcast feature.
+        
+        Returns:
+            Base64 encoded JPEG string of the last frame
+        """
+        return self._last_frame_b64
+    
+    def _show_error(self, message: str):
+        """Display an error message on the camera view."""
+        error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        error_frame[:] = (40, 20, 20)  # Dark red
+        
+        cv2.putText(
+            error_frame, 
+            message, 
+            (180, 240),
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            1.5, 
+            (100, 100, 255), 
+            2
+        )
+        
+        self._update_texture(error_frame)

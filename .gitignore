@@ -1,16 +1,9 @@
-# Node
-node_modules
-.next
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 .venv/
 venv/
-*.egg-info/
-dist/
-build/
 
 # IDE
 .idea/
@@ -21,11 +14,3 @@ build/
 # Environment
 .env
 .env.local
-
-# Models (large files)
-*.pt
-*.task
-
-# Misc
-nul
-*.log

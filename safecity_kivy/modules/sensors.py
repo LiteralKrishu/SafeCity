@@ -9,9 +9,20 @@ class SensorManager:
         self.has_hardware_gyro = False
         
         try:
+            from plyer import accelerometer
+            # Check if platform is supported before enabling to avoid ugly tracebacks
+            import sys
+            if sys.platform == 'win32':
+                # Plyer on Windows usually requires distinct implementation or hardware
+                # verifying if the specific module exists is hard without triggering import
+                # So we just try-except, but suppress stderr if we could, 
+                # but valid strategy is just to accept the log or check 'plyer.utils.platform'
+                pass
+
             accelerometer.enable()
             self.has_hardware_gyro = True
-        except:
+        except Exception as e:
+            # print(f"Sensor init error: {e}") # Debug only
             print("Plyer Accelerometer not available (likely Desktop). Using Mock Mode.")
             self.has_hardware_gyro = False
             

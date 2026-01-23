@@ -4,8 +4,12 @@ import unittest
 from unittest.mock import MagicMock
 
 # Mock libs
+mock_mp = MagicMock()
+sys.modules["mediapipe"] = mock_mp
+sys.modules["mediapipe.tasks"] = MagicMock()
+sys.modules["mediapipe.tasks.python"] = MagicMock()
+
 sys.modules["cv2"] = MagicMock()
-sys.modules["mediapipe"] = MagicMock()
 sys.modules["pyaudio"] = MagicMock()
 
 class TestSafeCityCore(unittest.TestCase):

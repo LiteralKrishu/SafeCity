@@ -59,8 +59,9 @@ class RiskEngine:
         self.distress_keywords = ["help", "stop", "police", "call 911", "save me", "danger"]
         
         # Actions that trigger specific risk levels
-        self.critical_actions = ["fighting", "hitting", "attacking", "stabbing"]
-        self.warning_actions = ["falling", "pushing", "running"]
+        # Updated: violent_shaking and impact are now critical (from motion detection)
+        self.critical_actions = ["violent_shaking", "impact", "fighting", "hitting", "attacking", "stabbing"]
+        self.warning_actions = ["running", "falling", "pushing"]
 
     def get_location_context(self):
         """Fetch location via IP and determine baseline risk."""

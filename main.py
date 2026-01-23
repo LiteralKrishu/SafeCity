@@ -52,8 +52,8 @@ class Icons:
     CHECK = chr(0xF012C)
     MAP = chr(0xF034D)
 
-# Load KV file
-Builder.load_file('safecity_kivy/safecity.kv')
+# Load KV file (using simplified version for debugging)
+Builder.load_file('safecity_kivy/safecity_simple.kv')
 
 
 class MainScreen(BoxLayout):
@@ -81,6 +81,7 @@ class MainScreen(BoxLayout):
     motion_impact_val = NumericProperty(0)
     context_risk_val = NumericProperty(0)
     system_confidence = NumericProperty(0)
+    detected_action_text = StringProperty("None")  # Safe property for KV binding
     
     # Animation properties
     pulse_opacity = NumericProperty(1.0)
@@ -90,6 +91,7 @@ class MainScreen(BoxLayout):
     broadcast_location = StringProperty("")
     broadcast_threat = StringProperty("")
     broadcast_contact = StringProperty("+1 (555) 123-4567")
+    broadcast_timestamp = StringProperty("")
     
     # Icons mapping
     icons = ObjectProperty(None)
@@ -156,33 +158,47 @@ class MainScreen(BoxLayout):
             self._pulse_direction = -1
 
     def toggle_monitoring(self):
-        app = App.get_running_app()
-        cam = self.ids.camera_view
-        
-        if not app.is_monitoring:
-            # START
-            app.is_monitoring = True
-            cam.start(0)
-            self.audio_mon.start_stream()
+        try:
+            app = App.get_running_app()
+            cam = self.ids.camera_view
             
-            # Schedule Sensor Checks
-            if not self.monitoring_event:
-                self.monitoring_event = Clock.schedule_interval(self.check_sensors, 0.1)
-            
-            self.status_text = "MONITORING"
-            self._update_status_color(RiskLevel.SAFE)
+            if not app.is_monitoring:
+                # START
+                print("[DEBUG] Starting monitoring...")
+                app.is_monitoring = True
                 
-        else:
-            # STOP
-            app.is_monitoring = False
-            cam.stop()
-            self.audio_mon.stop_stream()
-            if self.monitoring_event:
-                self.monitoring_event.cancel()
-                self.monitoring_event = None
-            self.status_text = "PAUSED"
-            self.status_level = "SAFE"
-            self._update_status_color(RiskLevel.SAFE)
+                print("[DEBUG] Starting camera...")
+                cam.start(0)
+                
+                print("[DEBUG] Starting audio stream...")
+                self.audio_mon.start_stream()
+                
+                # Schedule Sensor Checks
+                if not self.monitoring_event:
+                    print("[DEBUG] Scheduling sensor checks...")
+                    self.monitoring_event = Clock.schedule_interval(self.check_sensors, 0.1)
+                
+                self.status_text = "MONITORING"
+                self._update_status_color(RiskLevel.SAFE)
+                print("[DEBUG] Monitoring started successfully!")
+                    
+            else:
+                # STOP
+                print("[DEBUG] Stopping monitoring...")
+                app.is_monitoring = False
+                cam.stop()
+                self.audio_mon.stop_stream()
+                if self.monitoring_event:
+                    self.monitoring_event.cancel()
+                    self.monitoring_event = None
+                self.status_text = "PAUSED"
+                self.status_level = "SAFE"
+                self._update_status_color(RiskLevel.SAFE)
+                print("[DEBUG] Monitoring stopped.")
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] toggle_monitoring failed: {e}")
+            traceback.print_exc()
             
     def toggle_voice(self):
         if not self.voice_active:
@@ -254,8 +270,11 @@ class MainScreen(BoxLayout):
         self._update_ui_from_risk_state(risk_state)
         
         # 6. Check for SOS Trigger
-        if risk_state.level == RiskLevel.CRITICAL and self.sos_manager.state == "IDLE":
-            self._trigger_sos()
+        if risk_state.level == RiskLevel.CRITICAL:
+            print(f"[DEBUG] CRITICAL detected! SOS state: {self.sos_manager.state}")
+            if self.sos_manager.state == "IDLE":
+                print("[DEBUG] Triggering SOS countdown...")
+                self._trigger_sos()
         
         # 7. Cloud Logging (if action required)
         if risk_state.action_required:
@@ -284,6 +303,7 @@ class MainScreen(BoxLayout):
         
         # 1. Visual Threat
         self.visual_threat_val = 100 if cam.threat_level == "DANGER" else (50 if cam.threat_level == "WARNING" else 0)
+        self.detected_action_text = cam.detected_action if cam.detected_action else "None"
         
         # 2. Audio Analysis
         audio_res = self.audio_mon.process_chunk_full() # This might be redundant if called in check_sensors
@@ -311,6 +331,7 @@ class MainScreen(BoxLayout):
 
     def _trigger_sos(self):
         """Trigger SOS countdown."""
+        print("[DEBUG] _trigger_sos() called!")
         cam = self.ids.camera_view
         
         self.sos_manager.trigger_sos(
@@ -320,12 +341,14 @@ class MainScreen(BoxLayout):
             frame_b64=cam.get_last_frame_b64(),
             contact=self.broadcast_contact
         )
+        print("[DEBUG] SOS triggered successfully!")
 
     def _on_broadcast_started(self, data: dict):
         """Callback when broadcast starts."""
         self.broadcast_location = data.get("location", "Unknown")
         self.broadcast_threat = data.get("threat_info", "Emergency")
         self.broadcast_contact = data.get("contact", "+1 (555) 123-4567")
+        self.broadcast_timestamp = data.get("timestamp", "")
         
         # Log to cloud
         self.cloud_logger.log_incident("SOS_BROADCAST", "CRITICAL", data)
@@ -386,9 +409,14 @@ class SafeCityApp(App):
     is_monitoring = BooleanProperty(False)
 
     def build(self):
+        print("[DEBUG] SafeCityApp.build() called")
         return MainScreen()
 
+    def on_start(self):
+        print("[DEBUG] SafeCityApp.on_start() called - App is running!")
+        
     def on_stop(self):
+        print("[DEBUG] SafeCityApp.on_stop() called - App is closing!")
         # Cleanup
         if self.root:
             if self.is_monitoring:
@@ -400,4 +428,9 @@ class SafeCityApp(App):
 
 
 if __name__ == '__main__':
-    SafeCityApp().run()
+    try:
+        SafeCityApp().run()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        input("Press Enter to close...")

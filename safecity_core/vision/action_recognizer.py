@@ -51,8 +51,8 @@ class ActionRecognizer:
         "waving hand": "waving",
     }
     
-    DANGEROUS_ACTIONS = {"fighting", "hitting", "attacking", "stabbing", "kicking"}
-    WARNING_ACTIONS = {"falling", "pushing", "running", "tripping"}
+    DANGEROUS_ACTIONS = {"violent_shaking", "impact", "fighting", "hitting", "attacking", "stabbing", "kicking"}
+    WARNING_ACTIONS = {"running", "falling", "pushing", "tripping"}
     
     def __init__(self, model_path: Optional[str] = None, buffer_size: int = 16):
         """
@@ -137,6 +137,8 @@ class ActionRecognizer:
         Fallback heuristic-based action detection using motion analysis.
         
         Uses motion patterns to infer potential actions.
+        ADJUSTED: Much higher thresholds to reduce false positives.
+        Only truly violent shaking/running will trigger.
         """
         if len(self.motion_history) < 10:
             return ActionResult(action="unknown", confidence=0.0, is_dangerous=False)
@@ -146,39 +148,43 @@ class ActionRecognizer:
         max_motion = np.max(recent_motion)
         motion_variance = np.var(recent_motion)
         
-        # High, erratic motion -> potential fighting
-        if avg_motion > 0.15 and motion_variance > 0.01:
+        # VIOLENT SHAKING: Extremely high, erratic motion -> potential danger
+        # Threshold increased from 0.15 to 0.35 (more than doubled)
+        if avg_motion > 0.35 and motion_variance > 0.03:
             return ActionResult(
-                action="fighting",
-                confidence=min(0.7, avg_motion * 3),
+                action="violent_shaking",
+                confidence=min(0.8, avg_motion * 2),
                 is_dangerous=True
             )
         
-        # Sudden spike in motion -> potential fall or push
-        if max_motion > 0.25 and avg_motion < 0.1:
+        # FAST RUNNING: Sustained very high motion
+        # Threshold increased from 0.08 to 0.25
+        if avg_motion > 0.25 and motion_variance < 0.02:
             return ActionResult(
-                action="falling",
+                action="running",
+                confidence=0.7,
+                is_dangerous=True  # Running could indicate fleeing danger
+            )
+        
+        # SUDDEN IMPACT: Very sudden spike in motion -> fall or phone knocked
+        # Threshold increased from 0.25 to 0.40
+        if max_motion > 0.40 and avg_motion < 0.15:
+            return ActionResult(
+                action="impact",
+                confidence=0.6,
+                is_dangerous=True
+            )
+        
+        # Normal walking/movement - not dangerous
+        if avg_motion > 0.05:
+            return ActionResult(
+                action="walking",
                 confidence=0.6,
                 is_dangerous=False
             )
         
-        # Sustained high motion -> running
-        if avg_motion > 0.08 and motion_variance < 0.005:
-            return ActionResult(
-                action="running",
-                confidence=0.5,
-                is_dangerous=False
-            )
-        
-        # Low motion -> standing/walking
-        if avg_motion < 0.03:
-            return ActionResult(
-                action="standing",
-                confidence=0.8,
-                is_dangerous=False
-            )
-        
-        return ActionResult(action="walking", confidence=0.6, is_dangerous=False)
+        # Low motion -> standing still
+        return ActionResult(action="standing", confidence=0.8, is_dangerous=False)
     
     def process_frame(self, frame: np.ndarray) -> Optional[ActionResult]:
         """
