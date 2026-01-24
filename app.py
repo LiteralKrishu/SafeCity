@@ -89,8 +89,8 @@ with st.sidebar.expander("Sensor Simulation (Gyro)"):
     sim_z = st.slider("Acc Z", -4.0, 4.0, 0.0)
 
 with st.sidebar.expander("Settings"):
-    user_name = st.text_input("My Name", value="User")
-    emergency_contact = st.text_input("Emergency Contact", value="+1 (555) 123-4567")
+    user_name = st.text_input("My Name", value="Sousnigdho Das")
+    emergency_contact = st.text_input("Emergency Contact", value="+91 98765 43210")
     st.checkbox("Push Notifications", value=True)
 
 # --- Determine if we're in SOS mode ---
