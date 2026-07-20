@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "safecity-inference"
+version = "2.0.0"
+description = "Local, privacy-preserving SafeCity audio and motion threat assessment service"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "pydantic-settings>=2.10,<3",
+  "numpy>=1.26,<2.3",
+  "scipy>=1.15,<2",
+  "scikit-learn>=1.6,<2",
+  "tensorflow-cpu==2.20.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+  "tensorflow==2.20.0; platform_system != 'Linux' or platform_machine == 'aarch64'",
+  "tensorflow-hub==0.16.1",
+  "tf-keras>=2.20,<2.21",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.4,<9",
+  "pytest-cov>=6.2,<7",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

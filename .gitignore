@@ -1,46 +1,40 @@
-.venv
-venv/
-env/
-ENV/
+# JavaScript / Expo
+node_modules/
+mobile/.expo/
+mobile/.expo-shared/
+mobile/android/
+mobile/ios/
+mobile/dist/
+mobile/.env
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
 
 # Python
+.venv/
+venv/
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.swn
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Testing
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
+*.egg-info/
 
-# Environment variables
+# Local runtime data and downloaded ML models
+data/
+model-cache/
+service/.env
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Environment files
 .env
-.env.local
+.env.*
+!.env.example

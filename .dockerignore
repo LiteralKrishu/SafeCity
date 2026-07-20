@@ -1,0 +1,11 @@
+.git
+.gitignore
+mobile/node_modules
+mobile/.expo
+mobile/android
+mobile/ios
+data
+model-cache
+__pycache__
+.pytest_cache
+

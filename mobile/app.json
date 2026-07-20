@@ -1,0 +1,94 @@
+{
+  "expo": {
+    "name": "SafeCity",
+    "slug": "safecity",
+    "scheme": "safecity",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "platforms": ["ios", "android"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.safecity.mobile",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "UIBackgroundModes": ["audio", "location"]
+      }
+    },
+    "android": {
+      "package": "com.safecity.mobile",
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "backgroundColor": "#07111F"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "FOREGROUND_SERVICE_MICROPHONE",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SafeCity takes one front and one rear photo only after an SOS is activated."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "SafeCity listens for possible distress and records 15 seconds after an SOS.",
+          "enableBackgroundRecording": true,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SafeCity uses your location during monitoring and an active SOS.",
+          "locationAlwaysAndWhenInUsePermission": "SafeCity can attach your latest location to an active SOS.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "SafeCity uses device motion to detect possible falls or struggle patterns."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "safety-status"
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Use Face ID to protect SafeCity incident data."
+        }
+      ],
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true,
+          "useSQLCipher": true
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

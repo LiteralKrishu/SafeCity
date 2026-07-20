@@ -1,0 +1,63 @@
+[
+  {
+    "id": "coincident-scream-impact",
+    "name": "Distress vocalization with abrupt impact",
+    "description": "repeated scream shout or crying coincides with a high acceleration impact strong jerk and rotation",
+    "polarity": "risk",
+    "severity": 1.0,
+    "min_audio": 0.68,
+    "min_motion": 0.55,
+    "rationale": "Independent audio and motion signals agree within the same short window."
+  },
+  {
+    "id": "sustained-distress-struggle",
+    "name": "Sustained distress with struggle-like motion",
+    "description": "persistent screaming yelling wailing or sobbing across windows with chaotic repeated jerk and rotation",
+    "polarity": "risk",
+    "severity": 0.9,
+    "min_audio": 0.62,
+    "min_motion": 0.45,
+    "rationale": "Persistence and cross-signal agreement reduce the chance of a single accidental trigger."
+  },
+  {
+    "id": "fall-sequence",
+    "name": "Free-fall followed by impact",
+    "description": "brief free fall low acceleration followed quickly by strong impact consistent with a possible fall",
+    "polarity": "risk",
+    "severity": 0.78,
+    "min_audio": 0.0,
+    "min_motion": 0.82,
+    "rationale": "The ordered motion sequence is more specific than a high acceleration spike alone."
+  },
+  {
+    "id": "media-playback",
+    "name": "Likely television or music playback",
+    "description": "scream shout crying mixed with television radio music video game or sound effect and ordinary device motion",
+    "polarity": "suppress",
+    "severity": 0.85,
+    "min_audio": 0.2,
+    "min_motion": 0.0,
+    "rationale": "Media audio is a common source of false alarms and requires independent physical evidence."
+  },
+  {
+    "id": "device-drop",
+    "name": "Likely device drop",
+    "description": "single isolated impact spike without persistent distress vocalization or continuing chaotic movement",
+    "polarity": "suppress",
+    "severity": 0.65,
+    "min_audio": 0.0,
+    "min_motion": 0.45,
+    "rationale": "An isolated phone drop should prompt validation, not an automatic SOS."
+  },
+  {
+    "id": "transport-vibration",
+    "name": "Likely vehicle vibration",
+    "description": "repeating moderate acceleration and rotation without free fall impact sequence and without distress audio",
+    "polarity": "suppress",
+    "severity": 0.55,
+    "min_audio": 0.0,
+    "min_motion": 0.25,
+    "rationale": "Ordinary travel motion is down-weighted unless another independent signal agrees."
+  }
+]
+
