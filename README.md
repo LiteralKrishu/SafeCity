@@ -1,6 +1,6 @@
 # SafeCity
 
-SafeCity is a native Expo personal-safety app backed by a local Dockerized Python inference service. It monitors short-lived audio and motion windows, retrieves relevant known safety patterns, and uses conservative multi-signal fusion before escalating.
+SafeCity is a native Expo personal-safety app with its audio model, motion analysis, pattern matching and temporal fusion bundled in the Android/iOS app. Monitoring inference runs on the user’s phone without a laptop, Docker service, internet connection or cloud API.
 
 Continuous video analysis has been removed. After an SOS is confirmed, the visible app captures one rear photo, one front photo, and 15 seconds of audio, encrypts all three with AES-GCM, and stores them only in the app's private local storage.
 
@@ -10,34 +10,29 @@ Continuous video analysis has been removed. After an SOS is confirmed, the visib
 
 - Replaced the Streamlit web UI and Kivy prototype with an Expo SDK 57 iOS/Android app.
 - Removed YOLO, MediaPipe, all video-detection code, and the bundled video model assets.
-- Replaced single-frequency scream rules and random location risk with pretrained YAMNet audio classification, measured motion features, retrieved patterns, and temporal fusion.
+- Replaced single-frequency scream rules and random location risk with an APK-bundled YAMNet Lite classifier, measured motion features, deterministic safety patterns, and temporal fusion.
 - Added SQLCipher-encrypted local metadata and AES-GCM-encrypted evidence files.
 - Added consent, contextual permissions, emergency contacts, monitoring sessions, sensor health, tiered alert states, local history, false-alarm feedback, and deletion.
-- Added a non-root Docker service with a persistent local model cache and privacy-preserving assessment summaries.
+- Added adaptive on-device inference cadence, an in-memory silence gate and Android battery-saver awareness.
 
 ## Repository layout
 
 ```text
 SafeCity/
 ├── mobile/                 Expo / React Native app (no web target)
-├── service/                FastAPI + YAMNet + pattern RAG + fusion
+├── service/                Legacy development oracle and policy tests (not used by the app)
 ├── docs/                   Architecture, model card, and validation plan
-├── docker-compose.yml      Local inference runtime
+├── docker-compose.yml      Optional service-side comparison tests
 └── Makefile                Common development commands
 ```
 
-## Run the local AI service
+## On-device AI runtime
 
-Docker is the supported Python runtime. It pins Python 3.11 because TensorFlow does not support every system Python release.
-Start Docker Desktop before running Compose (`docker desktop start` on macOS).
+The official YAMNet TFLite model is stored at `mobile/assets/models/yamnet.tflite` and packaged by Metro into standalone builds. `react-native-fast-tflite` executes it through the native TensorFlow Lite C++ runtime. Audio remains in volatile memory; the app does not create a PCM cache file or make an inference network request.
 
-```bash
-docker compose up --build
-```
+Inference cadence is adaptive: roughly every 3 seconds in ordinary foreground monitoring, 5 seconds in the background, and 6 seconds in Android battery saver. Concerning motion temporarily shortens the interval to 1.2 seconds (2 seconds in battery saver). These are realistic efficiency defaults, not a battery-life or accuracy guarantee; profile them across supported physical devices before release.
 
-The first start downloads Google YAMNet into the `safecity-models` Docker volume. Later starts work from that local cache. Check readiness at `http://localhost:8000/health` and API documentation at `http://localhost:8000/docs`.
-
-For a physical phone, find the computer's LAN address and enter it in **SafeCity → Settings → Private AI service**, for example `http://192.168.1.10:8000`. The phone and computer must be on the same trusted network. Do not expose port 8000 to the public internet.
+The Python/Docker implementation remains only as a development comparison oracle for fusion-policy tests. It is not called, configured or required by the mobile app and is not included in an APK.
 
 ## Run the native app
 
@@ -54,9 +49,19 @@ Use `npm run android` for Android. A development build is required: Expo Go does
 
 On macOS, install the recommended Android JDK once with `brew install openjdk@17`, then use `npm run android`. The project wrapper selects the Homebrew JDK and installed Android SDK automatically.
 
+Create a standalone Android APK with:
+
+```bash
+cd mobile/android
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home \
+ANDROID_HOME="$HOME/Library/Android/sdk" \
+./gradlew app:assembleRelease
+```
+
+The repository’s current release variant still uses the debug signing key and must be given a protected production keystore before distribution.
+
 ### Local setup troubleshooting
 
-- `failed to connect to the docker API`: Docker Desktop is installed but stopped. Run `docker desktop start`, wait for it to report running, then rerun `docker compose up --build`.
 - `Unable to locate a Java Runtime`: install JDK 17 with `brew install openjdk@17` and run Android through `npm run android` so the project wrapper selects it.
 - `CocoaPods CLI not found`: iOS builds require CocoaPods and full Xcode. Install CocoaPods with `brew install cocoapods`; install Xcode through the App Store before running `npm run ios`.
 
@@ -64,7 +69,7 @@ On macOS, install the recommended Android JDK once with `brew install openjdk@17
 
 SafeCity deliberately prevents single-sensor auto-SOS decisions:
 
-1. YAMNet scores 1.5-second PCM windows against AudioSet classes.
+1. Bundled YAMNet Lite scores 0.975-second, 16 kHz PCM windows against 521 AudioSet classes on the phone.
 2. Motion features detect acceleration, jerk, rotation, and an ordered free-fall → impact sequence.
 3. The local pattern index retrieves both risk patterns and common suppressors such as television playback, transport vibration, and a dropped phone.
 4. Context can adjust a fused score by at most 3% and can never create a threat.
@@ -75,7 +80,7 @@ Thresholds are pilot defaults, not clinical or safety-certified guarantees. See 
 
 ## Evidence and platform constraints
 
-- Monitoring PCM is uploaded only to the LAN service, held in memory, analyzed, and discarded. It is never written to the service database.
+- Monitoring PCM is held in phone memory, analyzed locally, and discarded. It is not written to cache or transmitted for inference.
 - Incident photos and 15-second audio are AES-GCM encrypted before the temporary source files are deleted.
 - Mobile operating systems prevent a background app from silently opening cameras. Automatic front/rear capture therefore occurs only while the protected SOS capture screen is visible. A background detection stores the incident and raises a local notification that opens this screen.
 - SMS APIs open the system composer. The user must press **Send**; the app must not claim delivery.
@@ -85,11 +90,16 @@ Thresholds are pilot defaults, not clinical or safety-certified guarantees. See 
 
 ```bash
 cd mobile && npm run check
-docker compose build
-docker compose --profile test run --rm inference-test
+cd android && ./gradlew app:assembleRelease
 ```
 
-The current tests specifically cover media-playback suppression, time-context isolation, fall-only check-ins, audio-only check-ins, temporal confirmation, retrieval behavior, and API validation.
+The legacy service tests remain useful as a policy oracle for media-playback suppression, time-context isolation, single-modality check-ins and temporal confirmation, but they do not prove the APK’s field accuracy.
+
+## Privacy and legal readiness
+
+SafeCity includes an in-app, itemised privacy notice, Terms and Conditions, data-rights controls, versioned consent records, withdrawal and local device erasure. The corresponding deployment templates are in [PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md), [TERMS_AND_CONDITIONS.md](docs/TERMS_AND_CONDITIONS.md), and [DPDP_COMPLIANCE.md](docs/DPDP_COMPLIANCE.md).
+
+These templates do not by themselves make a deployment legally compliant. Before production distribution, copy `mobile/.env.example` to `mobile/.env`, provide the real Data Fiduciary and grievance details, complete every release blocker in the DPDP readiness register, and obtain review from qualified Indian privacy counsel. The app visibly warns when the legal configuration is incomplete.
 
 ## Research basis
 

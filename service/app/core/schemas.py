@@ -54,3 +54,11 @@ class AssessmentResponse(CamelModel):
 class FeedbackRequest(CamelModel):
     assessment_id: str
     verdict: str = Field(pattern="^(correct|false_positive|missed)$")
+
+
+class DataErasureRequest(CamelModel):
+    device_id: str = Field(min_length=8, max_length=128)
+
+
+class DataErasureResponse(CamelModel):
+    erased: int = Field(ge=0)

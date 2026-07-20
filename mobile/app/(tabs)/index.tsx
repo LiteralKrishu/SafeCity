@@ -63,7 +63,7 @@ export default function MonitorScreen() {
         <SensorTile label="Audio" detail="Pretrained sound model" state={health.microphone} />
         <SensorTile label="Motion" detail="Fall + jerk patterns" state={health.motion} />
         <SensorTile label="Location" detail="SOS context only" state={health.location} />
-        <SensorTile label="Local AI" detail="Docker inference" state={health.inference} />
+        <SensorTile label="On-device AI" detail="Bundled YAMNet Lite" state={health.inference} />
       </View>
 
       {latestAssessment?.matchedPatterns.length ? (
@@ -141,4 +141,3 @@ const styles = StyleSheet.create({
   sosHint: { color: colors.white, fontSize: type.caption, fontWeight: '700', marginTop: 3 },
   disclaimer: { color: colors.textMuted, textAlign: 'center', fontSize: 11, lineHeight: 17, marginTop: spacing.md, maxWidth: 320 },
 });
-

@@ -11,3 +11,6 @@ export async function getDeviceId(): Promise<string> {
   return id;
 }
 
+export async function resetDeviceId(): Promise<void> {
+  await SecureStore.deleteItemAsync(DEVICE_ID_KEY);
+}

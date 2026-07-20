@@ -14,7 +14,11 @@ const SETTINGS_KEY = 'app-settings';
 export const defaultSettings: AppSettings = {
   onboardingComplete: false,
   consentVersion: null,
-  serviceUrl: 'http://127.0.0.1:8000',
+  consentGrantedAt: null,
+  privacyNoticeVersion: null,
+  termsVersion: null,
+  termsAcceptedAt: null,
+  adultConfirmed: false,
   retentionDays: 30,
   discreetMode: true,
   backgroundLocation: true,
@@ -28,7 +32,9 @@ export async function readSettings(db: SQLiteDatabase): Promise<AppSettings> {
   if (!row) return defaultSettings;
 
   try {
-    return { ...defaultSettings, ...(JSON.parse(row.value) as Partial<AppSettings>) };
+    const stored = JSON.parse(row.value) as Partial<AppSettings> & { serviceUrl?: string };
+    const { serviceUrl: _retiredServiceUrl, ...currentSettings } = stored;
+    return { ...defaultSettings, ...currentSettings };
   } catch {
     return defaultSettings;
   }
@@ -67,7 +73,7 @@ export async function addContact(
     id: Crypto.randomUUID(),
     name: name.trim(),
     phone: phone.trim(),
-    verified: false,
+    verified: true,
     createdAt: new Date().toISOString(),
   };
   await db.runAsync(
@@ -75,7 +81,7 @@ export async function addContact(
     contact.id,
     contact.name,
     contact.phone,
-    0,
+    1,
     contact.createdAt,
   );
   return contact;
@@ -98,12 +104,17 @@ export async function listContacts(db: SQLiteDatabase): Promise<EmergencyContact
   }));
 }
 
-export async function verifyContact(db: SQLiteDatabase, id: string): Promise<void> {
-  await db.runAsync('UPDATE contacts SET verified = 1 WHERE id = ?', id);
-}
-
 export async function removeContact(db: SQLiteDatabase, id: string): Promise<void> {
   await db.runAsync('DELETE FROM contacts WHERE id = ?', id);
+}
+
+export async function eraseAllLocalData(db: SQLiteDatabase): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM incidents');
+    await db.runAsync('DELETE FROM sessions');
+    await db.runAsync('DELETE FROM contacts');
+    await db.runAsync('DELETE FROM settings');
+  });
 }
 
 export async function startSession(db: SQLiteDatabase): Promise<string> {

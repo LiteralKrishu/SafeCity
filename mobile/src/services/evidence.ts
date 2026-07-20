@@ -69,3 +69,8 @@ export function deleteEvidenceFiles(uris: Array<string | null>): void {
   }
 }
 
+export async function eraseEvidenceVault(): Promise<void> {
+  const evidenceDirectory = new Directory(Paths.document, 'evidence');
+  if (evidenceDirectory.exists) evidenceDirectory.delete();
+  await SecureStore.deleteItemAsync(EVIDENCE_KEY_NAME);
+}

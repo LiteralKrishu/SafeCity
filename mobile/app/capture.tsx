@@ -123,7 +123,7 @@ export default function CaptureScreen() {
         status,
       });
       const [incident, contacts] = await Promise.all([getIncident(db, incidentId), listContacts(db)]);
-      if (incident && contacts.some((contact) => contact.verified)) {
+      if (incident && contacts.length > 0) {
         await sendIncidentSms(contacts, incident).catch(() => false);
       }
       await monitoring.resumeAfterEvidence();

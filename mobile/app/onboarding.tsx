@@ -3,26 +3,29 @@ import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionButton } from '@/components/ActionButton';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
+import { addContact, listContacts, readSettings, writeSettings } from '@/db/repository';
 import {
-  addContact,
-  listContacts,
-  readSettings,
-  verifyContact,
-  writeSettings,
-} from '@/db/repository';
+  PRIVACY_NOTICE_VERSION,
+  PROCESSING_CONSENT_VERSION,
+  TERMS_VERSION,
+  legalConfigurationComplete,
+} from '@/legal/content';
 import { requestCorePermissions } from '@/services/permissions';
-import { sendContactVerificationSms } from '@/services/sms';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { EmergencyContact } from '@/types/domain';
 
@@ -32,208 +35,422 @@ const consentItems = [
   'I consent to one front photo, one rear photo, and 15 seconds of audio being encrypted locally after an SOS.',
 ] as const;
 
+const legalItems = [
+  'I confirm that I am at least 18 years old.',
+  'I have read the Privacy Notice, including the itemised data and purpose information.',
+  'I agree to the Terms and Conditions.',
+] as const;
+
 export default function OnboardingScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [consents, setConsents] = useState([false, false, false]);
+  const [legalAcceptances, setLegalAcceptances] = useState([false, false, false]);
+  const [consentVisible, setConsentVisible] = useState(false);
   const [permissionsRequested, setPermissionsRequested] = useState(false);
-  const [permissionSummary, setPermissionSummary] = useState('Not requested');
+  const [permissionSummary, setPermissionSummary] = useState('Not reviewed yet');
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [contactError, setContactError] = useState('');
+  const [permissionsBusy, setPermissionsBusy] = useState(false);
+  const [contactBusy, setContactBusy] = useState(false);
+  const [finishBusy, setFinishBusy] = useState(false);
 
   const refreshContacts = async () => setContacts(await listContacts(db));
   useEffect(() => {
     void refreshContacts();
   }, []);
 
+  const consentComplete = consents.every(Boolean) && legalAcceptances.every(Boolean);
   const canFinish = useMemo(
-    () => consents.every(Boolean) && contacts.some((contact) => contact.verified),
-    [consents, contacts],
+    () => consentComplete && contacts.length > 0,
+    [consentComplete, contacts.length],
   );
 
   const requestPermissions = async () => {
-    setBusy(true);
+    setPermissionsBusy(true);
     try {
       const result = await requestCorePermissions();
       await Notifications.requestPermissionsAsync();
       const granted = Object.values(result).filter(Boolean).length;
-      setPermissionSummary(`${granted} of ${Object.keys(result).length} safety permissions ready`);
+      setPermissionSummary(`${granted} of ${Object.keys(result).length} safety permissions allowed`);
       setPermissionsRequested(true);
     } catch {
-      setPermissionSummary('Some permissions were unavailable. You can retry in Settings.');
+      setPermissionSummary('Some permissions were unavailable. You can review them again.');
       setPermissionsRequested(true);
     } finally {
-      setBusy(false);
+      setPermissionsBusy(false);
     }
+  };
+
+  const openLegalDocument = (path: '/legal/privacy' | '/legal/terms') => {
+    setConsentVisible(false);
+    router.push(path);
   };
 
   const addNewContact = async () => {
-    if (!name.trim() || phone.trim().length < 5) {
-      Alert.alert('Contact needed', 'Enter a name and valid phone number.');
+    const cleanName = name.trim();
+    const cleanPhone = phone.trim();
+    if (!cleanName) {
+      setContactError('Enter the contact’s name.');
       return;
     }
-    await addContact(db, name, phone);
-    setName('');
-    setPhone('');
-    await refreshContacts();
-  };
+    if (cleanPhone.length < 5) {
+      setContactError('Enter a valid phone number, including the country code.');
+      return;
+    }
 
-  const testContact = async (contact: EmergencyContact) => {
-    const opened = await sendContactVerificationSms(contact.phone);
-    if (!opened) {
-      Alert.alert('SMS unavailable', 'SMS is not available on this device.');
-      return;
+    setContactBusy(true);
+    setContactError('');
+    try {
+      await addContact(db, cleanName, cleanPhone);
+      setName('');
+      setPhone('');
+      await refreshContacts();
+      setConsentVisible(true);
+    } catch {
+      setContactError('The contact could not be saved. Please try again.');
+    } finally {
+      setContactBusy(false);
     }
-    Alert.alert('Confirm test alert', 'After the recipient confirms it arrived, mark this contact verified.', [
-      { text: 'Not yet', style: 'cancel' },
-      {
-        text: 'Confirmed',
-        onPress: () => {
-          void verifyContact(db, contact.id).then(refreshContacts);
-        },
-      },
-    ]);
   };
 
   const finish = async () => {
-    const settings = await readSettings(db);
-    await writeSettings(db, {
-      ...settings,
-      onboardingComplete: true,
-      consentVersion: '2026-07-v1',
-    });
-    router.replace('/(tabs)');
+    setFinishBusy(true);
+    try {
+      const settings = await readSettings(db);
+      const acceptedAt = new Date().toISOString();
+      await writeSettings(db, {
+        ...settings,
+        onboardingComplete: true,
+        consentVersion: PROCESSING_CONSENT_VERSION,
+        consentGrantedAt: acceptedAt,
+        privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
+        termsVersion: TERMS_VERSION,
+        termsAcceptedAt: acceptedAt,
+        adultConfirmed: true,
+      });
+      router.replace('/(tabs)');
+    } finally {
+      setFinishBusy(false);
+    }
   };
 
   return (
-    <Screen eyebrow="Private by design" title="Your safety setup">
-      <View style={styles.intro}>
-        <Text style={styles.hero}>Protection that asks before it watches.</Text>
-        <Text style={styles.body}>
-          Continuous video has been removed. SafeCity analyzes short-lived audio and motion signals, then
-          secures evidence locally only after an SOS.
-        </Text>
-      </View>
-
-      <Text style={styles.sectionLabel}>1 · Understand and consent</Text>
-      <Card>
-        <View style={styles.stack}>
-          {consentItems.map((item, index) => (
-            <Pressable
-              key={item}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: consents[index] }}
-              onPress={() =>
-                setConsents((current) => current.map((value, itemIndex) => (itemIndex === index ? !value : value)))
-              }
-              style={styles.consentRow}
-            >
-              <View style={[styles.checkbox, consents[index] && styles.checkboxChecked]}>
-                <Text style={styles.check}>{consents[index] ? '✓' : ''}</Text>
-              </View>
-              <Text style={styles.consentText}>{item}</Text>
-            </Pressable>
-          ))}
-        </View>
-      </Card>
-
-      <Text style={styles.sectionLabel}>2 · Enable safety sensors</Text>
-      <Card title="Permissions" subtitle="Denied sensors degrade protection but never disable manual SOS.">
-        <View style={styles.cardAction}>
-          <Text style={styles.status}>{permissionSummary}</Text>
-          <ActionButton
-            label={permissionsRequested ? 'Review permissions again' : 'Grant permissions'}
-            onPress={() => void requestPermissions()}
-            variant="secondary"
-            loading={busy}
-          />
-        </View>
-      </Card>
-
-      <Text style={styles.sectionLabel}>3 · Verify an emergency contact</Text>
-      <Card title="Trusted contact" subtitle="SafeCity opens a prefilled SMS; the phone OS requires you to send it.">
-        <View style={styles.form}>
-          <TextInput
-            accessibilityLabel="Contact name"
-            placeholder="Name"
-            placeholderTextColor={colors.textMuted}
-            value={name}
-            onChangeText={setName}
-            style={styles.input}
-          />
-          <TextInput
-            accessibilityLabel="Phone number"
-            placeholder="Phone number with country code"
-            placeholderTextColor={colors.textMuted}
-            keyboardType="phone-pad"
-            value={phone}
-            onChangeText={setPhone}
-            style={styles.input}
-          />
-          <ActionButton label="Add contact" onPress={() => void addNewContact()} variant="secondary" />
-        </View>
-        {contacts.map((contact) => (
-          <View key={contact.id} style={styles.contactRow}>
-            <View style={styles.contactCopy}>
-              <Text style={styles.contactName}>{contact.name}</Text>
-              <Text style={styles.contactPhone}>{contact.phone}</Text>
-            </View>
-            {contact.verified ? (
-              <Text style={styles.verified}>✓ Verified</Text>
-            ) : (
-              <Pressable onPress={() => void testContact(contact)}>
-                <Text style={styles.testLink}>Send test</Text>
-              </Pressable>
-            )}
+    <>
+      <Screen eyebrow="Private by design" title="Set up SafeCity">
+        <View style={styles.intro}>
+          <Text style={styles.hero}>Three quick steps before you start.</Text>
+          <Text style={styles.body}>
+            Choose sensor access, save an emergency contact, then review exactly what SafeCity may analyze and store.
+          </Text>
+          <View style={styles.progressRow}>
+            <StepPill label="Sensors" complete={permissionsRequested} />
+            <StepPill label="Contact" complete={contacts.length > 0} />
+            <StepPill label="Consent" complete={consentComplete} />
           </View>
-        ))}
-      </Card>
+        </View>
 
-      <View style={styles.finish}>
-        <ActionButton label="Finish safety setup" onPress={() => void finish()} disabled={!canFinish} />
-        {!canFinish ? (
-          <Text style={styles.hint}>Accept all three statements and verify at least one contact.</Text>
-        ) : null}
-      </View>
-    </Screen>
+        <Text style={styles.sectionLabel}>1 · Enable safety sensors</Text>
+        <Card title="Choose protection access" subtitle="You stay in control and can change permissions later in Settings.">
+          <View style={styles.locationCallout}>
+            <Text style={styles.locationTitle}>Location: choose “Allow all the time”</Text>
+            <Text style={styles.locationBody}>
+              This is preferable for more reliable location coverage during an active monitoring session, even when SafeCity is not on screen.
+            </Text>
+          </View>
+          <View style={styles.cardAction}>
+            <View style={styles.statusRow}>
+              <Text style={styles.statusLabel}>Current status</Text>
+              <Text style={[styles.status, permissionsRequested && styles.statusReady]}>{permissionSummary}</Text>
+            </View>
+            <ActionButton
+              label={permissionsRequested ? 'Review sensor permissions' : 'Choose sensor permissions'}
+              onPress={() => void requestPermissions()}
+              variant="secondary"
+              loading={permissionsBusy}
+            />
+          </View>
+        </Card>
+
+        <Text style={styles.sectionLabel}>2 · Add an emergency contact</Text>
+        <Card
+          title="Who should be ready to help?"
+          subtitle="A saved contact is immediately included when SafeCity prepares an SOS message. No verification step is required."
+        >
+          <View style={styles.form}>
+            <View>
+              <Text style={styles.inputLabel}>Contact name</Text>
+              <TextInput
+                accessibilityLabel="Emergency contact name"
+                autoCapitalize="words"
+                placeholder="e.g. Alex"
+                placeholderTextColor={colors.textMuted}
+                value={name}
+                onChangeText={(value) => {
+                  setName(value);
+                  setContactError('');
+                }}
+                style={styles.input}
+              />
+            </View>
+            <View>
+              <Text style={styles.inputLabel}>Phone number</Text>
+              <TextInput
+                accessibilityLabel="Emergency contact phone number"
+                placeholder="Include country code"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="phone-pad"
+                textContentType="telephoneNumber"
+                value={phone}
+                onChangeText={(value) => {
+                  setPhone(value);
+                  setContactError('');
+                }}
+                onSubmitEditing={() => void addNewContact()}
+                style={styles.input}
+              />
+            </View>
+            {contactError ? (
+              <Text accessibilityRole="alert" style={styles.errorText}>{contactError}</Text>
+            ) : null}
+            <ActionButton
+              label="Save contact and continue"
+              onPress={() => void addNewContact()}
+              variant="secondary"
+              loading={contactBusy}
+            />
+          </View>
+
+          {contacts.length > 0 ? (
+            <View style={styles.savedContacts}>
+              <Text style={styles.savedHeading}>Ready for SOS</Text>
+              {contacts.map((contact) => (
+                <View key={contact.id} style={styles.contactRow}>
+                  <View style={styles.contactAvatar}>
+                    <Text style={styles.contactInitial}>{contact.name.slice(0, 1).toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.contactCopy}>
+                    <Text style={styles.contactName}>{contact.name}</Text>
+                    <Text style={styles.contactPhone}>{contact.phone}</Text>
+                  </View>
+                  <Text style={styles.readyBadge}>Saved</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </Card>
+
+        <Text style={styles.sectionLabel}>3 · Review and consent</Text>
+        <Card>
+          <View style={styles.consentSummary}>
+            <View style={[styles.summaryIcon, consentComplete && styles.summaryIconComplete]}>
+              <Text style={styles.summaryIconText}>{consentComplete ? '✓' : '3'}</Text>
+            </View>
+            <View style={styles.summaryCopy}>
+              <Text style={styles.summaryTitle}>{consentComplete ? 'Consent confirmed' : 'Final confirmation'}</Text>
+              <Text style={styles.summaryBody}>
+                {contacts.length > 0
+                  ? 'Review the processing notice, age requirement and terms before finishing setup.'
+                  : 'Save an emergency contact first. The consent confirmation will open next.'}
+              </Text>
+            </View>
+          </View>
+          {contacts.length > 0 ? (
+            <View style={styles.cardAction}>
+              <ActionButton
+                label={consentComplete ? 'Review consent' : 'Review and confirm'}
+                onPress={() => setConsentVisible(true)}
+                variant="secondary"
+              />
+            </View>
+          ) : null}
+        </Card>
+
+        <View style={styles.finish}>
+          <ActionButton
+            label="Finish setup"
+            onPress={() => void finish()}
+            disabled={!canFinish}
+            loading={finishBusy}
+          />
+          {!canFinish ? (
+            <Text style={styles.hint}>Save a contact, review the legal documents and confirm every statement.</Text>
+          ) : (
+            <Text style={styles.readyHint}>You’re ready to use SafeCity.</Text>
+          )}
+        </View>
+      </Screen>
+
+      <Modal
+        transparent
+        visible={consentVisible}
+        onRequestClose={() => setConsentVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalRoot}
+        >
+          <Pressable
+            accessibilityLabel="Close consent confirmation"
+            onPress={() => setConsentVisible(false)}
+            style={styles.backdrop}
+          />
+          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <View style={styles.sheetHandle} />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.sheetEyebrow}>Final step</Text>
+              <Text style={styles.sheetTitle}>Understand and consent</Text>
+              <Text style={styles.sheetBody}>
+                Review the processing purposes and legal documents, then confirm every statement with a separate affirmative action.
+              </Text>
+
+              {!legalConfigurationComplete ? (
+                <View accessibilityRole="alert" style={styles.legalWarning}>
+                  <Text style={styles.legalWarningTitle}>Prototype legal configuration</Text>
+                  <Text style={styles.legalWarningBody}>
+                    The deploying operator’s identity and grievance contacts are not configured. Do not distribute this build as a production service.
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.legalLinks}>
+                <Pressable
+                  accessibilityRole="link"
+                  onPress={() => openLegalDocument('/legal/privacy')}
+                  style={styles.legalLinkButton}
+                >
+                  <Text style={styles.legalLinkText}>Read Privacy Notice</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="link"
+                  onPress={() => openLegalDocument('/legal/terms')}
+                  style={styles.legalLinkButton}
+                >
+                  <Text style={styles.legalLinkText}>Read Terms</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.consentList}>
+                {consentItems.map((item, index) => (
+                  <Pressable
+                    key={item}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: consents[index] }}
+                    onPress={() =>
+                      setConsents((current) =>
+                        current.map((value, itemIndex) => (itemIndex === index ? !value : value)),
+                      )
+                    }
+                    style={({ pressed }) => [styles.consentRow, pressed && styles.consentRowPressed]}
+                  >
+                    <View style={[styles.checkbox, consents[index] && styles.checkboxChecked]}>
+                      <Text style={styles.check}>{consents[index] ? '✓' : ''}</Text>
+                    </View>
+                    <Text style={styles.consentText}>{item}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.legalHeading}>Age and legal acceptance</Text>
+              <View style={styles.consentList}>
+                {legalItems.map((item, index) => (
+                  <Pressable
+                    key={item}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: legalAcceptances[index] }}
+                    onPress={() =>
+                      setLegalAcceptances((current) =>
+                        current.map((value, itemIndex) => (itemIndex === index ? !value : value)),
+                      )
+                    }
+                    style={({ pressed }) => [styles.consentRow, pressed && styles.consentRowPressed]}
+                  >
+                    <View style={[styles.checkbox, legalAcceptances[index] && styles.checkboxChecked]}>
+                      <Text style={styles.check}>{legalAcceptances[index] ? '✓' : ''}</Text>
+                    </View>
+                    <Text style={styles.consentText}>{item}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={styles.sheetActions}>
+                <ActionButton
+                  label="Confirm consent"
+                  onPress={() => setConsentVisible(false)}
+                  disabled={!consentComplete}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setConsentVisible(false)}
+                  style={styles.notNowButton}
+                >
+                  <Text style={styles.notNowText}>Not now</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </>
+  );
+}
+
+function StepPill({ label, complete }: { label: string; complete: boolean }) {
+  return (
+    <View style={[styles.stepPill, complete && styles.stepPillComplete]}>
+      <Text style={[styles.stepPillText, complete && styles.stepPillTextComplete]}>
+        {complete ? '✓ ' : ''}{label}
+      </Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  intro: { marginBottom: spacing.xl },
-  hero: { color: colors.text, fontSize: 34, lineHeight: 39, fontWeight: '800', letterSpacing: -1.2 },
-  body: { color: colors.textMuted, fontSize: type.body, lineHeight: 23, marginTop: spacing.md },
+  intro: { marginBottom: spacing.lg },
+  hero: { color: colors.text, fontSize: 30, lineHeight: 36, fontWeight: '800' },
+  body: { color: colors.textMuted, fontSize: type.body, lineHeight: 23, marginTop: spacing.sm },
+  progressRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg },
+  stepPill: {
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  stepPillComplete: { borderColor: colors.safe, backgroundColor: colors.safeSoft },
+  stepPillText: { color: colors.textMuted, fontSize: type.caption, fontWeight: '700' },
+  stepPillTextComplete: { color: colors.safe },
   sectionLabel: {
     color: colors.textMuted,
     fontWeight: '800',
     fontSize: type.caption,
-    letterSpacing: 1,
     textTransform: 'uppercase',
     marginTop: spacing.lg,
     marginBottom: spacing.sm,
   },
-  stack: { gap: spacing.md },
-  consentRow: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
+  locationCallout: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.watch,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    marginTop: spacing.md,
   },
-  checkboxChecked: { backgroundColor: colors.safe, borderColor: colors.safe },
-  check: { color: colors.background, fontWeight: '900' },
-  consentText: { flex: 1, color: colors.text, fontSize: type.body, lineHeight: 22 },
+  locationTitle: { color: colors.text, fontSize: type.body, fontWeight: '800' },
+  locationBody: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18, marginTop: spacing.xs },
   cardAction: { gap: spacing.md, marginTop: spacing.md },
-  status: { color: colors.textMuted, fontSize: type.body },
-  form: { gap: spacing.sm, marginTop: spacing.md },
+  statusRow: { gap: spacing.xs },
+  statusLabel: { color: colors.textMuted, fontSize: type.caption, fontWeight: '700' },
+  status: { color: colors.text, fontSize: type.body, fontWeight: '700' },
+  statusReady: { color: colors.safe },
+  form: { gap: spacing.md, marginTop: spacing.lg },
+  inputLabel: { color: colors.text, fontSize: type.caption, fontWeight: '700', marginBottom: spacing.xs },
   input: {
-    minHeight: 50,
+    minHeight: 52,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -242,20 +459,126 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     fontSize: type.body,
   },
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  errorText: { color: colors.danger, fontSize: type.caption, lineHeight: 18 },
+  savedContacts: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
   },
+  savedHeading: { color: colors.textMuted, fontSize: type.caption, fontWeight: '800', marginBottom: spacing.sm },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  contactAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.safeSoft,
+  },
+  contactInitial: { color: colors.safe, fontWeight: '900' },
   contactCopy: { flex: 1 },
   contactName: { color: colors.text, fontWeight: '700' },
   contactPhone: { color: colors.textMuted, fontSize: type.caption, marginTop: 3 },
-  verified: { color: colors.safe, fontWeight: '800', fontSize: type.caption },
-  testLink: { color: colors.watch, fontWeight: '800' },
+  readyBadge: { color: colors.safe, fontSize: type.caption, fontWeight: '800' },
+  consentSummary: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  summaryIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  summaryIconComplete: { backgroundColor: colors.safeSoft, borderColor: colors.safe },
+  summaryIconText: { color: colors.safe, fontWeight: '900', fontSize: type.heading },
+  summaryCopy: { flex: 1 },
+  summaryTitle: { color: colors.text, fontWeight: '800', fontSize: type.body },
+  summaryBody: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18, marginTop: spacing.xs },
   finish: { gap: spacing.sm, marginTop: spacing.xl },
-  hint: { color: colors.textMuted, textAlign: 'center', fontSize: type.caption },
+  hint: { color: colors.textMuted, textAlign: 'center', fontSize: type.caption, lineHeight: 18 },
+  readyHint: { color: colors.safe, textAlign: 'center', fontSize: type.caption, fontWeight: '700' },
+  modalRoot: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.68)',
+  },
+  sheet: {
+    maxHeight: '88%',
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  sheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: radii.pill,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  sheetEyebrow: { color: colors.watch, fontSize: type.caption, fontWeight: '800', textTransform: 'uppercase' },
+  sheetTitle: { color: colors.text, fontSize: type.title, fontWeight: '800', marginTop: spacing.xs },
+  sheetBody: { color: colors.textMuted, fontSize: type.body, lineHeight: 22, marginTop: spacing.sm },
+  legalWarning: {
+    borderWidth: 1,
+    borderColor: colors.alert,
+    backgroundColor: colors.alertSoft,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+  },
+  legalWarningTitle: { color: colors.alert, fontWeight: '800', fontSize: type.body },
+  legalWarningBody: { color: colors.text, fontSize: type.caption, lineHeight: 18, marginTop: spacing.xs },
+  legalLinks: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  legalLinkButton: {
+    flex: 1,
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: colors.watch,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  legalLinkText: { color: colors.watch, fontSize: type.caption, fontWeight: '800', textAlign: 'center' },
+  consentList: { gap: spacing.sm, marginTop: spacing.lg },
+  legalHeading: { color: colors.text, fontSize: type.heading, fontWeight: '800', marginTop: spacing.lg },
+  consentRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    alignItems: 'flex-start',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceRaised,
+    padding: spacing.md,
+  },
+  consentRowPressed: { opacity: 0.78 },
+  checkbox: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: { backgroundColor: colors.safe, borderColor: colors.safe },
+  check: { color: colors.background, fontWeight: '900' },
+  consentText: { flex: 1, color: colors.text, fontSize: type.body, lineHeight: 22 },
+  sheetActions: { gap: spacing.sm, marginTop: spacing.lg },
+  notNowButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  notNowText: { color: colors.textMuted, fontSize: type.body, fontWeight: '700' },
 });
-

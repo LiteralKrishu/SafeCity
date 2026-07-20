@@ -88,6 +88,14 @@ class AssessmentStore:
             )
             return cursor.rowcount == 1
 
+    def erase_device(self, device_id: str) -> int:
+        """Erase every retained assessment associated with a device identifier."""
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM assessments WHERE device_hash = ?", (self._hash(device_id),)
+            )
+            return cursor.rowcount
+
     def metrics(self) -> dict[str, int | float]:
         with self._connect() as connection:
             total = connection.execute("SELECT COUNT(*) FROM assessments").fetchone()[0]

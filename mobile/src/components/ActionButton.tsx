@@ -38,7 +38,14 @@ export function ActionButton({
       ) : (
         <View style={styles.row}>
           {icon}
-          <Text style={[styles.label, variant === 'secondary' && styles.secondaryLabel]}>{label}</Text>
+          <Text
+            style={[
+              styles.label,
+              (variant === 'secondary' || variant === 'ghost') && styles.contrastLabel,
+            ]}
+          >
+            {label}
+          </Text>
         </View>
       )}
     </Pressable>
@@ -61,6 +68,5 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.4 },
   row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   label: { color: colors.background, fontSize: type.body, fontWeight: '800' },
-  secondaryLabel: { color: colors.text },
+  contrastLabel: { color: colors.text },
 });
-

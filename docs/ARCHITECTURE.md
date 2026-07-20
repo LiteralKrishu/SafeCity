@@ -2,16 +2,14 @@
 
 ## Trust boundary
 
-The mobile device and the user's local inference computer are the only trusted processing locations. The service binds to port 8000 for LAN development but has no cloud integration, user account, or provider secret. It must stay behind a trusted firewall.
+The mobile device is the inference and storage trust boundary. The production app does not require or call a laptop, LAN API or cloud model. The Python service in this repository is retained only as a development comparison oracle and is outside the mobile runtime path.
 
 ```text
-Expo app
-  ├─ PCM stream (1.5 s, ephemeral) ───────┐
-  ├─ DeviceMotion features ───────────────┼─> FastAPI on local Docker
-  └─ Hour + app-state context ────────────┘      ├─ YAMNet / AudioSet
-                                                  ├─ pattern retriever
-                                                  ├─ temporal fusion
-                                                  └─ summary-only SQLite
+Expo / React Native app
+  ├─ PCM stream (0.975 s tail, in memory) ─> bundled YAMNet TFLite ─┐
+  ├─ DeviceMotion ─> acceleration/jerk/rotation/fall features ─────┼─> local patterns
+  └─ hour + app-state (bounded context) ────────────────────────────┘   + temporal fusion
+                                                                         └─ transient result
 
 Confirmed SOS
   ├─ rear still photo ──┐
@@ -21,24 +19,26 @@ Confirmed SOS
 
 ## Mobile modules
 
-- `MonitoringProvider`: owns the native PCM stream, motion subscription, session lifecycle, service calls, local fallback, and SOS transition. DeviceMotion acceleration is normalized from m/s² to g before feature extraction.
+- `MonitoringProvider`: owns the native PCM stream, motion subscription, adaptive cadence, battery-saver state, session lifecycle, local inference and SOS transition. DeviceMotion acceleration is normalized from m/s² to g before feature extraction. GPS is not refreshed for every inference window.
 - `DatabaseProvider`: obtains a random 256-bit database key from platform SecureStore, applies the SQLCipher key before migrations, and enables WAL.
 - `capture.tsx`: suspends the monitoring stream, records evidence, switches rear → front cameras, encrypts each result, updates the incident atomically, and resumes monitoring.
 - `backgroundLocation.ts`: keeps only the latest location and uses the required visible OS background indicator.
 - `monitorStore.ts`: contains transient UI state only; durable history stays in SQLite.
 
-## Inference modules
+## On-device inference modules
 
-- `audio.py`: lazy-loads Google YAMNet, normalizes/resamples PCM to mono 16 kHz, scores distress classes, measures persistence, and applies media confounder penalties.
-- `patterns.py`: builds a local TF-IDF index over approved positive and suppressor patterns. Custom patterns can be added through the Docker data volume without sending data externally.
-- `fusion.py`: combines available modalities, applies bounded context, maintains per-session windows, enforces confirmation, hysteresis, and incident cooldown.
-- `storage.py`: stores hashed device/session identifiers and derived summaries only. Raw audio and precise location are excluded.
+- `onDeviceAudio.ts`: lazy-loads the APK-bundled 3.9 MB YAMNet TFLite model through the native C++ runtime, converts/resamples PCM to a fixed 15,600-sample float32 waveform, applies a conservative silence gate and scores distress/media classes. Inference runs asynchronously and is serialized to bound memory use.
+- `localFusion.ts`: calculates motion risk, evaluates six inspectable risk/suppressor patterns, combines available modalities, applies bounded context, maintains the last eight windows per session, and enforces confirmation, hysteresis and incident cooldown.
+- `MonitoringProvider.tsx`: retains only the latest audio tail in memory and schedules ordinary inference at 3 seconds foreground, 5 seconds background or 6 seconds in battery saver. Concerning motion temporarily uses 1.2 seconds, or 2 seconds in battery saver.
+- No ordinary inference summary is written to durable storage. Only an escalated incident is stored in the encrypted database.
+
+The optional `service/` implementation mirrors the earlier server-side policy for comparison tests. It is not imported by the app, is not packaged into the APK and is not a deployment dependency.
 
 ## Failure behavior
 
 | Failure | Safe behavior |
 | --- | --- |
-| Inference service offline | Motion-only local fallback; automatic SOS disabled; manual SOS remains available |
+| Bundled model fails to load | Motion-only local fallback; automatic audio-motion SOS is disabled; manual SOS remains available |
 | Microphone denied | Motion monitoring continues with visibly degraded health |
 | Motion unavailable | Audio may request check-in but cannot automatically SOS |
 | Location denied | Incident is stored without a location; detection is unchanged |
@@ -48,4 +48,4 @@ Confirmed SOS
 
 ## Production gaps
 
-This repository is a safety-oriented MVP, not a release-certified product. A production pilot still requires TLS or authenticated local pairing, signed model/config updates, a reviewed delivery provider, a representative consented dataset, real-device background tests, battery profiling, accessibility review, security review, and regional legal/privacy review.
+This repository is a safety-oriented MVP, not a release-certified product. A production pilot still requires a protected release keystore, signed model/config update and rollback controls, a reviewed delivery provider, a representative consented dataset, real-device background tests, battery and thermal profiling, accessibility review, mobile security review, completed Data Fiduciary and grievance contacts, language access, operational rights and breach procedures, applicable processor contracts, and Indian legal/privacy review. See [DPDP_COMPLIANCE.md](DPDP_COMPLIANCE.md).

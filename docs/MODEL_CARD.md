@@ -8,11 +8,11 @@ SafeCity estimates whether short audio and motion windows resemble a possible pe
 
 ### Pretrained audio model
 
-- Model: Google YAMNet (`https://tfhub.dev/google/yamnet/1`)
+- Model: Google YAMNet TFLite classification model (`https://tfhub.dev/google/lite-model/yamnet/classification/tflite/1`)
 - Training taxonomy: 521 AudioSet event classes
 - Input: single-channel 16 kHz waveform
 - Role: produce evidence for screaming, shouting, crying, wailing, gunfire, explosions, and related classes
-- Optimization: one lazy singleton, CPU thread limits, model-volume cache, short float32 input, and serialized inference to avoid TensorFlow contention
+- Optimization: APK-bundled 3.9 MB model, one lazy native singleton, fixed 15,600-sample float32 input, conservative silence gate, serialized asynchronous inference, bounded audio buffers, adaptive cadence and Android battery-saver awareness
 
 YAMNet is a broad environmental-sound classifier, not a purpose-trained women's-safety model. Its raw scores must never be interpreted as calibrated emergency probabilities.
 
@@ -59,7 +59,7 @@ These are starting points for safety review, not universal guarantees:
 - false automatic SOS below 1 per 100 monitored hours in controlled non-distress scenarios;
 - fused-event precision at least 0.95 for automatic SOS on the held-out scripted set;
 - recall at least 0.90 for predefined synchronized distress scenarios;
-- P95 service decision latency below 1.5 seconds after a complete input window on supported hardware;
+- P95 on-device decision latency below 1.5 seconds after a complete input window on supported hardware;
 - subgroup gaps reviewed and no modality launched where harm is unacceptable;
 - signed threshold/config rollback tested before pilot.
 
@@ -69,10 +69,10 @@ These are starting points for safety review, not universal guarantees:
 - Quiet coercion or medical events may have no detectable audio or motion.
 - Device position greatly affects motion and microphone measurements.
 - YAMNet labels do not capture intent or the cause of a sound.
-- The local service being unavailable disables pretrained audio inference.
+- A model-load or native-runtime failure disables pretrained audio inference and leaves motion-only fallback plus manual SOS.
 - Thresholds have not been calibrated on representative field data.
 - Mobile OS background restrictions prevent guaranteed continuous execution.
 
 ## Feedback and privacy
 
-False-positive feedback is stored locally and linked to the model/config version. Raw monitoring audio is never stored by the inference service. Incident media is separately consented, encrypted on the phone, and user-deletable.
+False-positive feedback is stored locally and linked to the model/config version. Raw monitoring audio is processed in volatile phone memory and is not cached or transmitted for inference. Incident media is separately consented, encrypted on the phone, and user-deletable.

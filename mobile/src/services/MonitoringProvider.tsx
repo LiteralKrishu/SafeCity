@@ -1,14 +1,11 @@
 import { useAudioStream, setAudioModeAsync, type AudioStreamBuffer } from 'expo-audio';
-import { File, Paths } from 'expo-file-system';
+import * as Battery from 'expo-battery';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { DeviceMotion } from 'expo-sensors';
 import { useSQLiteContext } from 'expo-sqlite';
-import {
-  AppState,
-  type AppStateStatus,
-} from 'react-native';
+import { AppState, type AppStateStatus } from 'react-native';
 import {
   createContext,
   type PropsWithChildren,
@@ -30,8 +27,16 @@ import {
   startBackgroundLocation,
   stopBackgroundLocation,
 } from '@/services/backgroundLocation';
-import { getDeviceId } from '@/services/deviceIdentity';
-import { analyzeSignalWindow, checkInferenceHealth } from '@/services/inferenceApi';
+import {
+  assessLocalSignalWindow,
+  calculateMotionScore,
+  resetLocalSession,
+} from '@/inference/localFusion';
+import {
+  initializeOnDeviceAudio,
+  YAMNET_INPUT_SAMPLES,
+  YAMNET_SAMPLE_RATE,
+} from '@/inference/onDeviceAudio';
 import { getSensorHealth } from '@/services/permissions';
 import { useMonitorStore } from '@/store/monitorStore';
 import type { Assessment } from '@/types/domain';
@@ -58,16 +63,28 @@ interface MonitoringActions {
 }
 
 const MonitoringContext = createContext<MonitoringActions | null>(null);
-const WINDOW_SECONDS = 1.5;
+const ACTIVE_INTERVAL_MS = 3_000;
+const ELEVATED_INTERVAL_MS = 1_200;
+const BACKGROUND_INTERVAL_MS = 5_000;
+const LOW_POWER_INTERVAL_MS = 6_000;
+const LOW_POWER_ELEVATED_INTERVAL_MS = 2_000;
 
-function mergeChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
-  const merged = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
+function requiredPcmBytes(sampleRate: number): number {
+  return Math.round((sampleRate * YAMNET_INPUT_SAMPLES * 2) / YAMNET_SAMPLE_RATE);
+}
+
+function takeLatestBytes(chunks: Uint8Array[], totalBytes: number, limit: number): Uint8Array {
+  const outputSize = Math.min(totalBytes, limit);
+  const output = new Uint8Array(outputSize);
+  let targetStart = outputSize;
+  for (let index = chunks.length - 1; index >= 0 && targetStart > 0; index -= 1) {
+    const chunk = chunks[index];
+    if (!chunk) continue;
+    const copySize = Math.min(chunk.byteLength, targetStart);
+    targetStart -= copySize;
+    output.set(chunk.subarray(chunk.byteLength - copySize), targetStart);
   }
-  return merged;
+  return output;
 }
 
 export function MonitoringProvider({ children }: PropsWithChildren) {
@@ -77,13 +94,31 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   const motionSubscription = useRef<ReturnType<typeof DeviceMotion.addListener> | null>(null);
   const audioChunks = useRef<Uint8Array[]>([]);
   const audioBytes = useRef(0);
-  const uploading = useRef(false);
+  const inferenceBusy = useRef(false);
   const lastAudioAt = useRef(0);
-  const serviceUrl = useRef('http://127.0.0.1:8000');
+  const lastInferenceAt = useRef(0);
+  const lowPowerMode = useRef(false);
   const latestLocation = useRef<{ latitude: number; longitude: number } | null>(null);
   const locationUpdatedAt = useRef(0);
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const submitBufferedAudioRef = useRef<(sampleRate: number) => Promise<void>>(async () => undefined);
+  const shouldAnalyzeRef = useRef<() => boolean>(() => false);
+
+  shouldAnalyzeRef.current = () => {
+    const motion = motionWindow.current.snapshot();
+    const motionScore = calculateMotionScore(motion).score;
+    const elevated = motion.impactAfterFreeFall || motionScore >= 0.35;
+    const interval = elevated
+      ? lowPowerMode.current
+        ? LOW_POWER_ELEVATED_INTERVAL_MS
+        : ELEVATED_INTERVAL_MS
+      : lowPowerMode.current
+        ? LOW_POWER_INTERVAL_MS
+        : appState.current === 'active'
+          ? ACTIVE_INTERVAL_MS
+          : BACKGROUND_INTERVAL_MS;
+    return Date.now() - lastInferenceAt.current >= interval;
+  };
 
   const handleAudioBuffer = useCallback((buffer: AudioStreamBuffer) => {
     if (useMonitorStore.getState().sessionState !== 'monitoring') return;
@@ -91,8 +126,17 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     audioChunks.current.push(chunk);
     audioBytes.current += chunk.byteLength;
     lastAudioAt.current = Date.now();
-    const requiredBytes = buffer.sampleRate * WINDOW_SECONDS * 2;
-    if (audioBytes.current >= requiredBytes && !uploading.current) {
+    const requiredBytes = requiredPcmBytes(buffer.sampleRate);
+    if (audioBytes.current > requiredBytes * 2) {
+      const tail = takeLatestBytes(audioChunks.current, audioBytes.current, requiredBytes);
+      audioChunks.current = [tail];
+      audioBytes.current = tail.byteLength;
+    }
+    if (
+      audioBytes.current >= requiredBytes &&
+      !inferenceBusy.current &&
+      shouldAnalyzeRef.current()
+    ) {
       void submitBufferedAudioRef.current(buffer.sampleRate);
     }
   }, []);
@@ -147,14 +191,14 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   );
 
   const submitWindow = useCallback(
-    async (audioFile: File | null, sampleRate: number) => {
+    async (pcmBytes: Uint8Array | null, sampleRate: number) => {
       const state = useMonitorStore.getState();
       if (state.sessionState !== 'monitoring' || !state.sessionId) return;
       const motion = motionWindow.current.snapshot();
       let assessment: Assessment;
       try {
-        assessment = await analyzeSignalWindow(serviceUrl.current, audioFile, {
-          deviceId: await getDeviceId(),
+        assessment = await assessLocalSignalWindow({
+          audioBytes: pcmBytes,
           sessionId: state.sessionId,
           sampleRate,
           motion,
@@ -179,21 +223,24 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   );
 
   submitBufferedAudioRef.current = async (sampleRate: number) => {
-    if (uploading.current || audioBytes.current === 0) return;
-    uploading.current = true;
+    if (
+      inferenceBusy.current ||
+      audioBytes.current === 0 ||
+      !shouldAnalyzeRef.current()
+    ) {
+      return;
+    }
+    inferenceBusy.current = true;
+    lastInferenceAt.current = Date.now();
     const chunks = audioChunks.current;
     const byteLength = audioBytes.current;
     audioChunks.current = [];
     audioBytes.current = 0;
-    const file = new File(Paths.cache, `safecity-window-${Date.now()}.pcm`);
     try {
-      file.create({ overwrite: true });
-      file.write(mergeChunks(chunks, byteLength));
-      await refreshLocation();
-      await submitWindow(file, sampleRate);
+      const pcmBytes = takeLatestBytes(chunks, byteLength, requiredPcmBytes(sampleRate));
+      await submitWindow(pcmBytes, sampleRate);
     } finally {
-      if (file.exists) file.delete();
-      uploading.current = false;
+      inferenceBusy.current = false;
     }
   };
 
@@ -225,26 +272,26 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     motionSubscription.current = null;
     audioChunks.current = [];
     audioBytes.current = 0;
+    lastAudioAt.current = 0;
   }, [audioStream.stream]);
 
   const startMonitoring = useCallback(async () => {
     const state = useMonitorStore.getState();
     if (state.sessionState !== 'idle') return;
     const settings = await readSettings(db);
-    serviceUrl.current = settings.serviceUrl;
     const id = await startSession(db);
     state.setSession('monitoring', id);
-    state.setHealth({
-      inference: (await checkInferenceHealth(settings.serviceUrl)) ? 'ready' : 'offline',
-    });
-    await activateSensors();
-    await refreshLocation();
+    state.setHealth({ inference: 'checking' });
+    lastInferenceAt.current = Date.now();
+    lastAudioAt.current = Date.now();
+    const modelReady = initializeOnDeviceAudio()
+      .then(() => true)
+      .catch(() => false);
+    const [, onDeviceModelReady] = await Promise.all([activateSensors(), modelReady]);
+    state.setHealth({ inference: onDeviceModelReady ? 'ready' : 'offline' });
+    void refreshLocation();
     if (settings.backgroundLocation) {
-      try {
-        await startBackgroundLocation();
-      } catch {
-        state.setHealth({ location: 'degraded' });
-      }
+      void startBackgroundLocation().catch(() => state.setHealth({ location: 'degraded' }));
     }
   }, [activateSensors, db, refreshLocation]);
 
@@ -262,8 +309,13 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     if (!state.sessionId || state.sessionState !== 'paused') return;
     await updateSession(db, state.sessionId, 'monitoring');
     state.setSession('monitoring', state.sessionId);
+    state.setHealth({ inference: 'checking' });
+    const modelReady = initializeOnDeviceAudio()
+      .then(() => true)
+      .catch(() => false);
     await activateSensors();
-    await startBackgroundLocation().catch(() => state.setHealth({ location: 'degraded' }));
+    state.setHealth({ inference: (await modelReady) ? 'ready' : 'offline' });
+    void startBackgroundLocation().catch(() => state.setHealth({ location: 'degraded' }));
   }, [activateSensors, db]);
 
   const stopMonitoring = useCallback(async () => {
@@ -271,6 +323,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     deactivateSensors();
     await stopBackgroundLocation();
     if (state.sessionId) await updateSession(db, state.sessionId, 'stopped');
+    resetLocalSession(state.sessionId ?? undefined);
     state.setSession('idle', null);
     state.resetRisk();
   }, [db, deactivateSensors]);
@@ -317,10 +370,18 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       appState.current = nextState;
-      const state = useMonitorStore.getState();
-      if (state.sessionState === 'monitoring') {
-        state.setHealth({ microphone: nextState === 'active' ? 'ready' : 'degraded' });
-      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    void Battery.isLowPowerModeEnabledAsync()
+      .then((enabled) => {
+        lowPowerMode.current = enabled;
+      })
+      .catch(() => undefined);
+    const subscription = Battery.addLowPowerModeListener(({ lowPowerMode: enabled }) => {
+      lowPowerMode.current = enabled;
     });
     return () => subscription.remove();
   }, []);
@@ -340,19 +401,20 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       const state = useMonitorStore.getState();
       if (
         state.sessionState === 'monitoring' &&
-        Date.now() - lastAudioAt.current > WINDOW_SECONDS * 1_500 &&
-        !uploading.current
+        Date.now() - lastAudioAt.current > 2_500 &&
+        !inferenceBusy.current &&
+        shouldAnalyzeRef.current()
       ) {
-        uploading.current = true;
-        void refreshLocation()
-          .then(() => submitWindow(null, 16_000))
+        inferenceBusy.current = true;
+        lastInferenceAt.current = Date.now();
+        void submitWindow(null, YAMNET_SAMPLE_RATE)
           .finally(() => {
-            uploading.current = false;
+            inferenceBusy.current = false;
           });
       }
-    }, WINDOW_SECONDS * 1_000);
+    }, 1_000);
     return () => clearInterval(interval);
-  }, [refreshLocation, submitWindow]);
+  }, [submitWindow]);
 
   useEffect(() => () => deactivateSensors(), [deactivateSensors]);
 

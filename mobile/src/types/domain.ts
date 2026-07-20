@@ -70,9 +70,12 @@ export interface MotionFeatures {
 export interface AppSettings {
   onboardingComplete: boolean;
   consentVersion: string | null;
-  serviceUrl: string;
+  consentGrantedAt: string | null;
+  privacyNoticeVersion: string | null;
+  termsVersion: string | null;
+  termsAcceptedAt: string | null;
+  adultConfirmed: boolean;
   retentionDays: number;
   discreetMode: boolean;
   backgroundLocation: boolean;
 }
-

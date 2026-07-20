@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import {
@@ -17,25 +17,33 @@ import { Screen } from '@/components/Screen';
 import {
   addContact,
   defaultSettings,
+  eraseAllLocalData,
   listContacts,
   readSettings,
   removeContact,
-  verifyContact,
   writeSettings,
 } from '@/db/repository';
-import { checkInferenceHealth } from '@/services/inferenceApi';
 import { requestCorePermissions } from '@/services/permissions';
-import { sendContactVerificationSms } from '@/services/sms';
+import { resetDeviceId } from '@/services/deviceIdentity';
+import { eraseEvidenceVault } from '@/services/evidence';
+import { useMonitoring } from '@/services/MonitoringProvider';
+import {
+  PRIVACY_NOTICE_VERSION,
+  TERMS_VERSION,
+  legalConfigurationComplete,
+} from '@/legal/content';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { AppSettings, EmergencyContact } from '@/types/domain';
 
 export default function SettingsScreen() {
   const db = useSQLiteContext();
+  const router = useRouter();
+  const monitoring = useMonitoring();
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [serviceState, setServiceState] = useState<'unknown' | 'ready' | 'offline'>('unknown');
+  const [erasing, setErasing] = useState(false);
 
   const refresh = useCallback(async () => {
     const [storedSettings, storedContacts] = await Promise.all([readSettings(db), listContacts(db)]);
@@ -65,71 +73,75 @@ export default function SettingsScreen() {
     await refresh();
   };
 
-  const verify = async (contact: EmergencyContact) => {
-    if (!(await sendContactVerificationSms(contact.phone))) {
-      Alert.alert('SMS unavailable', 'SMS is not available on this device.');
-      return;
-    }
-    Alert.alert('Did the test arrive?', 'Confirm only after the recipient tells you it arrived.', [
-      { text: 'No', style: 'cancel' },
-      {
-        text: 'Yes, verify',
-        onPress: () => void verifyContact(db, contact.id).then(refresh),
-      },
-    ]);
-  };
-
-  const testService = async () => {
-    setServiceState('unknown');
-    const ready = await checkInferenceHealth(settings.serviceUrl);
-    setServiceState(ready ? 'ready' : 'offline');
+  const withdrawConsentAndErase = () => {
+    Alert.alert(
+      'Withdraw consent and erase data?',
+      'Monitoring will stop. Contacts, sessions, incidents, locations, consent records and encrypted evidence will be permanently deleted from this device.',
+      [
+        { text: 'Keep my data', style: 'cancel' },
+        {
+          text: 'Withdraw and erase',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setErasing(true);
+              try {
+                await monitoring.stopMonitoring();
+                await eraseEvidenceVault();
+                await eraseAllLocalData(db);
+                await resetDeviceId();
+                router.replace('/onboarding');
+                Alert.alert(
+                  'Consent withdrawn',
+                  'Monitoring stopped and this installation’s saved personal data was erased.',
+                );
+              } catch {
+                Alert.alert(
+                  'Erasure incomplete',
+                  'SafeCity could not complete the local deletion. Keep the app installed and try again.',
+                );
+              } finally {
+                setErasing(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
   };
 
   return (
     <Screen eyebrow="Local controls" title="Settings">
       <Text style={styles.sectionLabel}>Inference</Text>
-      <Card title="Private AI service" subtitle="Use the computer's LAN address on a physical phone, for example http://192.168.1.10:8000.">
-        <TextInput
-          accessibilityLabel="Local inference service URL"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          value={settings.serviceUrl}
-          onChangeText={(serviceUrl) => setSettings((current) => ({ ...current, serviceUrl }))}
-          onBlur={() => void writeSettings(db, settings)}
-          style={styles.input}
-        />
-        <View style={styles.serviceRow}>
-          <Text
-            style={[
-              styles.serviceState,
-              serviceState === 'ready' && styles.ready,
-              serviceState === 'offline' && styles.offline,
-            ]}
-          >
-            {serviceState === 'unknown' ? 'Not checked' : serviceState === 'ready' ? '● Service ready' : '● Service offline'}
-          </Text>
-          <Pressable onPress={() => void testService()}>
-            <Text style={styles.link}>Test connection</Text>
-          </Pressable>
+      <Card
+        title="On-device AI"
+        subtitle="The audio model and every risk calculation are bundled in the app. Monitoring audio is not sent to a laptop, server or cloud."
+      >
+        <View style={styles.localAiList}>
+          <View style={styles.localAiRow}>
+            <Text style={styles.localAiMark}>✓</Text>
+            <Text style={styles.localAiText}>Works without internet or a companion computer</Text>
+          </View>
+          <View style={styles.localAiRow}>
+            <Text style={styles.localAiMark}>✓</Text>
+            <Text style={styles.localAiText}>Audio is processed in memory and is not cached</Text>
+          </View>
+          <View style={styles.localAiRow}>
+            <Text style={styles.localAiMark}>✓</Text>
+            <Text style={styles.localAiText}>Adaptive sampling slows automatically in the background and in battery saver</Text>
+          </View>
         </View>
       </Card>
 
       <Text style={styles.sectionLabel}>Emergency contacts</Text>
-      <Card subtitle="Only verified contacts are included in the SOS message composer.">
+      <Card subtitle="Every saved contact is included when SafeCity prepares an SOS message.">
         {contacts.map((contact) => (
           <View key={contact.id} style={styles.contactRow}>
             <View style={styles.contactCopy}>
               <Text style={styles.contactName}>{contact.name}</Text>
               <Text style={styles.contactPhone}>{contact.phone}</Text>
             </View>
-            {!contact.verified ? (
-              <Pressable onPress={() => void verify(contact)}>
-                <Text style={styles.link}>Verify</Text>
-              </Pressable>
-            ) : (
-              <Text style={styles.verified}>✓ Verified</Text>
-            )}
+            <Text style={styles.contactReady}>✓ Ready</Text>
             <Pressable
               accessibilityLabel={`Remove ${contact.name}`}
               onPress={() => void removeContact(db, contact.id).then(refresh)}
@@ -192,12 +204,55 @@ export default function SettingsScreen() {
       </Card>
 
       <Text style={styles.sectionLabel}>Permissions</Text>
-      <Card title="Sensor access" subtitle="The dashboard always shows when protection is degraded.">
+      <Card
+        title="Sensor access"
+        subtitle="For the most reliable monitoring coverage, choose “Allow all the time” for location. The dashboard always shows when protection is degraded."
+      >
         <View style={styles.cardAction}>
           <ActionButton
             label="Review sensor permissions"
             variant="secondary"
             onPress={() => void requestCorePermissions().then(() => Alert.alert('Permissions updated'))}
+          />
+        </View>
+      </Card>
+
+      <Text style={styles.sectionLabel}>Legal and your data</Text>
+      <Card
+        title="Privacy controls"
+        subtitle={
+          legalConfigurationComplete
+            ? `Privacy ${PRIVACY_NOTICE_VERSION} · Terms ${TERMS_VERSION}`
+            : 'Production operator and grievance details are not configured. Do not distribute this build.'
+        }
+      >
+        <View style={styles.legalActions}>
+          <ActionButton
+            label="Privacy Notice"
+            variant="secondary"
+            onPress={() => router.push('/legal/privacy')}
+          />
+          <ActionButton
+            label="Terms and Conditions"
+            variant="secondary"
+            onPress={() => router.push('/legal/terms')}
+          />
+          <ActionButton
+            label="Your data rights"
+            variant="secondary"
+            onPress={() => router.push('/legal/rights')}
+          />
+        </View>
+        <View style={styles.erasureBlock}>
+          <Text style={styles.erasureTitle}>Withdraw consent</Text>
+          <Text style={styles.erasureBody}>
+            Stops monitoring and erases this installation’s personal data. This cannot be undone.
+          </Text>
+          <ActionButton
+            label="Withdraw consent and erase data"
+            variant="danger"
+            onPress={withdrawConsentAndErase}
+            loading={erasing}
           />
         </View>
       </Card>
@@ -261,11 +316,10 @@ const styles = StyleSheet.create({
     fontSize: type.body,
     marginTop: spacing.md,
   },
-  serviceRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md },
-  serviceState: { color: colors.textMuted, fontSize: type.caption, fontWeight: '700' },
-  ready: { color: colors.safe },
-  offline: { color: colors.danger },
-  link: { color: colors.watch, fontWeight: '800', fontSize: type.caption },
+  localAiList: { gap: spacing.sm, marginTop: spacing.md },
+  localAiRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  localAiMark: { color: colors.safe, fontWeight: '900' },
+  localAiText: { flex: 1, color: colors.textMuted, fontSize: type.caption, lineHeight: 18 },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -277,7 +331,7 @@ const styles = StyleSheet.create({
   contactCopy: { flex: 1 },
   contactName: { color: colors.text, fontWeight: '700' },
   contactPhone: { color: colors.textMuted, fontSize: type.caption, marginTop: 3 },
-  verified: { color: colors.safe, fontWeight: '800', fontSize: type.caption },
+  contactReady: { color: colors.safe, fontWeight: '800', fontSize: type.caption },
   remove: { color: colors.textMuted, fontSize: 24 },
   form: { gap: spacing.sm },
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
@@ -303,7 +357,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   cardAction: { marginTop: spacing.md },
+  legalActions: { gap: spacing.sm, marginTop: spacing.md },
+  erasureBlock: {
+    gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  erasureTitle: { color: colors.danger, fontSize: type.heading, fontWeight: '800' },
+  erasureBody: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18 },
   warningTitle: { color: colors.alert, fontSize: type.heading, fontWeight: '800' },
   warningBody: { color: colors.textMuted, fontSize: type.body, lineHeight: 22, marginTop: spacing.sm },
 });
-

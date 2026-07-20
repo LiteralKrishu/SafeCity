@@ -10,14 +10,13 @@ export function localFallbackAssessment(motion: MotionFeatures): Assessment {
     fusedScore: severeMotion ? 0.66 : concerningMotion ? 0.36 : 0.08,
     needsEvidenceCapture: false,
     explanation: severeMotion
-      ? 'A possible fall or impact was detected while local AI was unavailable.'
+      ? 'A possible fall or impact was detected while on-device audio AI was unavailable.'
       : concerningMotion
         ? 'Unusual movement is being validated.'
         : 'No strong local distress pattern detected.',
-    factors: severeMotion ? ['Possible fall-impact sequence', 'Inference service offline'] : [],
+    factors: severeMotion ? ['Possible fall-impact sequence', 'On-device audio AI unavailable'] : [],
     matchedPatterns: [],
-    modelVersion: 'motion-fallback-v1',
+    modelVersion: 'on-device-motion-fallback-v2',
     latencyMs: 0,
   };
 }
-

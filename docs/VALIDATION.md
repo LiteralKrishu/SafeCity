@@ -3,8 +3,8 @@
 ## Automated checks
 
 - TypeScript strict type-check and Expo dependency validation.
-- Unit tests for retrieval, false-positive suppressors, single-modality gates, temporal confirmation, and API schema rejection.
-- Docker health check and non-root execution.
+- Unit tests for pattern matching, false-positive suppressors, single-modality gates and temporal confirmation.
+- Release APK inspection confirming the JavaScript bundle, native TFLite runtime and YAMNet asset are packaged.
 - Static search verifying no Streamlit, Kivy, OpenCV, YOLO, MediaPipe, video recording, or cloud-model dependency remains.
 
 ## Device matrix
@@ -28,7 +28,7 @@ Each scenario should have multiple participants, devices, positions, and environ
 2. Films/TV/social media containing screams, games, music, sirens, celebrations.
 3. Phone drops, abrupt pocket removal, bag movement, stairs, potholes, cycling.
 4. Consented scripted shout + struggle, cry + fall, repeated plea + impact, silent fall.
-5. Network loss, inference restart, warm/cold model cache, low battery, airplane mode.
+5. Airplane mode, cold/warm on-device model load, battery saver, low battery, thermal throttling and recovery after app restart.
 
 No participant should enter real danger for testing.
 
@@ -38,4 +38,3 @@ No participant should enter real danger for testing.
 2. Controlled scripted pilot with an observer and immediate opt-out.
 3. Limited opt-in beta only after privacy, security, accessibility, fairness, and model-quality review.
 4. General availability only after an audited notification provider and supported-device matrix exist.
-

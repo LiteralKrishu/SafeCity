@@ -10,7 +10,13 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.core.schemas import AnalyzeMetadata, AssessmentResponse, FeedbackRequest
+from app.core.schemas import (
+    AnalyzeMetadata,
+    AssessmentResponse,
+    DataErasureRequest,
+    DataErasureResponse,
+    FeedbackRequest,
+)
 from app.core.storage import AssessmentStore
 from app.detection.audio import AudioInference, YamnetAudioClassifier
 from app.detection.fusion import FusionEngine
@@ -99,6 +105,11 @@ def build_router(
         if not updated:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Assessment not found")
         return {"updated": True}
+
+    @router.post("/v1/privacy/erase", response_model=DataErasureResponse)
+    async def erase_device_data(payload: DataErasureRequest) -> DataErasureResponse:
+        erased = await asyncio.to_thread(storage.erase_device, payload.device_id)
+        return DataErasureResponse(erased=erased)
 
     @router.get("/metrics")
     async def metrics() -> dict[str, int | float]:
