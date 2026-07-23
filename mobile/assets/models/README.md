@@ -10,3 +10,5 @@
 - Upstream licence: Apache License 2.0; preserve upstream notices and review model/dataset terms before distribution.
 
 SafeCity uses only a small reviewed subset of output classes for distress and media-suppression evidence. YAMNet is a broad environmental-sound classifier; it is not calibrated as an emergency probability and must be validated on representative, consented device recordings before any production accuracy claim.
+
+The optional Help / Bachao detector is documented separately in [`voice-trigger/README.md`](voice-trigger/README.md). It uses the Apache-licensed Sherpa-ONNX `zh-en-3M` keyword model and is not part of YAMNet inference.

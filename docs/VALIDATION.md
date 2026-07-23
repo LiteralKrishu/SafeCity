@@ -4,7 +4,7 @@
 
 - TypeScript strict type-check and Expo dependency validation.
 - Unit tests for pattern matching, false-positive suppressors, single-modality gates and temporal confirmation.
-- Release APK inspection confirming the JavaScript bundle, native TFLite runtime and YAMNet asset are packaged.
+- EAS preview APK inspection confirming the JavaScript bundle, native TFLite runtime and YAMNet asset are packaged.
 - Static search verifying no Streamlit, Kivy, OpenCV, YOLO, MediaPipe, video recording, or cloud-model dependency remains.
 
 ## Device matrix
@@ -13,11 +13,13 @@ At minimum, test one low/mid/high Android device across Android 12–16 and supp
 
 - microphone and DeviceMotion behavior in foreground, screen lock, background, interruptions, and force quit;
 - rear/front capture success and timing;
-- 15-second recording duration and encryption success;
+- pre-alert WAV header/playback, 15-second RAM duration, post-SOS recording duration and encryption success;
+- bundled-model extraction and cold/warm startup, “Help” / “Bachao” accent/noise recall, similar-word and television false activations, serialized stream reset, low-end CPU latency, battery/thermal impact, and foreground/background continuity;
 - evidence recovery after app restart;
 - SQLCipher migration and SecureStore behavior after biometric/passcode changes;
 - SMS composer behavior, canceled send, and unavailable SIM/device states;
 - location permission: denied, approximate, foreground, background, and revoked;
+- OpenStreetMap place/lighting lookup success, timeout, empty result, attribution and no fabricated-pin fallback;
 - battery percentage and thermal state for 30-, 60-, and 120-minute sessions.
 
 ## Scenario matrix

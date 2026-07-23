@@ -23,7 +23,7 @@ Official sources:
 | Adult-only gate | User must confirm age 18+; no claim of a child-capable flow |
 | Easy withdrawal | Settings provides a destructive confirmation that stops monitoring and erases this installation’s local personal data |
 | Access and correction | History, Settings and a Data Rights screen expose local categories; contacts/settings can be corrected |
-| Data minimisation | No continuous video; short in-memory audio windows; bounded context; no raw-audio retention; location excluded from inference |
+| Data minimisation | No continuous video; short in-memory audio windows; 15-second RAM tail encrypted only after confirmed SOS; bounded context; location excluded from inference |
 | Encryption | SQLCipher metadata, platform-protected keys and AES-GCM evidence |
 | Retention | 1–90 day local incident retention; ordinary inference windows are not stored; individual and bulk deletion |
 | Local inference | Bundled YAMNet Lite, motion features, pattern matching and temporal fusion execute on the phone without a laptop or network request |

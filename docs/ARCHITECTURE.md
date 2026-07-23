@@ -6,15 +6,17 @@ The mobile device is the inference and storage trust boundary. The production ap
 
 ```text
 Expo / React Native app
-  ├─ PCM stream (0.975 s tail, in memory) ─> bundled YAMNet TFLite ─┐
-  ├─ DeviceMotion ─> acceleration/jerk/rotation/fall features ─────┼─> local patterns
-  └─ hour + app-state (bounded context) ────────────────────────────┘   + temporal fusion
+  ├─ PCM stream (0.975 s inference + 15 s RAM ring) ─> YAMNet ─────┐
+  ├─ optional bundled Help/Bachao keyword spotter ─────────────────┤
+  ├─ DeviceMotion ─> acceleration/jerk/rotation/fall features ──────┼─> local patterns
+  └─ hour + app-state (bounded context) ─────────────────────────────┘   + temporal fusion
                                                                          └─ transient result
 
 Confirmed SOS
-  ├─ rear still photo ──┐
+  ├─ 15 s pre-alert WAV ┐
+  ├─ rear still photo ──┤
   ├─ front still photo ─┼─> AES-GCM ─> app-private document storage
-  └─ 15 s audio ────────┘
+  └─ 15 s post audio ───┘
 ```
 
 ## Mobile modules
@@ -23,6 +25,8 @@ Confirmed SOS
 - `DatabaseProvider`: obtains a random 256-bit database key from platform SecureStore, applies the SQLCipher key before migrations, and enables WAL.
 - `capture.tsx`: suspends the monitoring stream, records evidence, switches rear → front cameras, encrypts each result, updates the incident atomically, and resumes monitoring.
 - `backgroundLocation.ts`: keeps only the latest location and uses the required visible OS background indicator.
+- `voice-trigger.ts`: copies the bundled quantized Sherpa-ONNX files into private cache, feeds the existing 16 kHz PCM stream into a serialized one-thread keyword spotter, and emits only `HELP` or `BACHAO`.
+- `safeRoute.ts`: retrieves user-requested OpenStreetMap facilities and lighting context; generated locations are never used as a data fallback.
 - `monitorStore.ts`: contains transient UI state only; durable history stays in SQLite.
 
 ## On-device inference modules
@@ -42,6 +46,8 @@ The optional `service/` implementation mirrors the earlier server-side policy fo
 | Microphone denied | Motion monitoring continues with visibly degraded health |
 | Motion unavailable | Audio may request check-in but cannot automatically SOS |
 | Location denied | Incident is stored without a location; detection is unchanged |
+| Bundled keyword engine fails to load | Voice trigger shows an error; scream, motion and manual SOS remain available |
+| Nearby-place request fails | No pins are fabricated; Maps search and 112 remain available |
 | Camera denied/backgrounded | Incident remains active; available audio is saved; missing evidence is explicit |
 | SMS unavailable | Incident stays local and UI shows the failure; no delivery claim |
 | App killed | OS monitoring stops; no claim of continuous protection |

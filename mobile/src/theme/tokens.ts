@@ -1,17 +1,30 @@
+import { DynamicColorIOS, Platform, PlatformColor, type ColorValue } from 'react-native';
+
+function adaptiveColor(light: string, dark: string, androidAttribute: string): ColorValue {
+  if (Platform.OS === 'ios') return DynamicColorIOS({ light, dark });
+  if (Platform.OS === 'android') return PlatformColor(androidAttribute);
+  return dark;
+}
+
 export const colors = {
-  background: '#07111F',
-  surface: '#0C1A2B',
-  surfaceRaised: '#11233A',
-  border: '#1D3652',
-  text: '#F5F8FC',
-  textMuted: '#91A6BE',
-  safe: '#45D39A',
-  safeSoft: '#123B35',
-  watch: '#58A6FF',
+  background: adaptiveColor('#F4F7FA', '#080B13', '?attr/colorBackground'),
+  surface: adaptiveColor('#FFFFFF', '#12151C', '?attr/colorBackgroundFloating'),
+  surfaceRaised: adaptiveColor('#E8EDF2', '#1B1E27', '?attr/colorButtonNormal'),
+  navigation: adaptiveColor('#FFFFFF', '#0D1420', '?attr/colorBackgroundFloating'),
+  border: adaptiveColor('#CFD6DE', '#2A2E38', '?attr/colorControlNormal'),
+  text: adaptiveColor('#111827', '#F7F8FA', '?attr/textColorPrimary'),
+  textMuted: adaptiveColor('#526071', '#969DAC', '?attr/textColorSecondary'),
+  textSubtle: adaptiveColor('#667085', '#667085', '?attr/textColorSecondary'),
+  safe: '#17C990',
+  safeDark: '#117455',
+  safeSoft: adaptiveColor('#DDF7EE', '#123B34', '?attr/colorButtonNormal'),
+  watch: '#7DD3FC',
   alert: '#FFB547',
-  alertSoft: '#3E2E16',
-  danger: '#FF5D73',
-  dangerSoft: '#431C28',
+  alertSoft: adaptiveColor('#FFF1D6', '#3E2E16', '?attr/colorButtonNormal'),
+  danger: '#FF4A55',
+  dangerSoft: adaptiveColor('#FDE7EA', '#431C28', '?attr/colorButtonNormal'),
+  dangerBorder: '#5D242A',
+  dangerPanel: adaptiveColor('#FFF7F8', '#160D13', '?attr/colorBackgroundFloating'),
   white: '#FFFFFF',
   black: '#000000',
 } as const;
@@ -39,4 +52,3 @@ export const type = {
   body: 15,
   caption: 12,
 } as const;
-

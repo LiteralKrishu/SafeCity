@@ -1,9 +1,9 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { type ColorValue, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { RiskLevel } from '@/types/domain';
 
-const riskStyle: Record<RiskLevel, { color: string; background: string; label: string; icon: string }> = {
+const riskStyle: Record<RiskLevel, { color: ColorValue; background: ColorValue; label: string; icon: string }> = {
   safe: { color: colors.safe, background: colors.safeSoft, label: 'Safe', icon: '✓' },
   watch: { color: colors.watch, background: colors.surfaceRaised, label: 'Validating', icon: '◌' },
   alert: { color: colors.alert, background: colors.alertSoft, label: 'Check in', icon: '!' },
@@ -59,4 +59,3 @@ const styles = StyleSheet.create({
   scoreLabel: { color: colors.textMuted, fontSize: type.caption },
   score: { fontWeight: '800', fontSize: type.caption },
 });
-

@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { listIncidents } from '@/db/repository';
+import { useLocalization } from '@/i18n/localization-provider';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { Incident } from '@/types/domain';
 
@@ -15,6 +16,7 @@ const stateColor = (state: Incident['state']) =>
 export default function HistoryScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const { languageTag, t } = useLocalization();
   const [incidents, setIncidents] = useState<Incident[]>([]);
 
   useFocusEffect(
@@ -24,16 +26,16 @@ export default function HistoryScreen() {
   );
 
   return (
-    <Screen eyebrow="Stored on this device" title="Incident history">
+    <Screen eyebrow={t('history.eyebrow')} title={t('history.title')}>
       <Card
-        title={`${incidents.length} local incident${incidents.length === 1 ? '' : 's'}`}
-        subtitle="Raw monitoring audio is discarded. Only SOS evidence and decision summaries appear here."
+        title={incidents.length === 1 ? t('history.countOne') : t('history.count', { count: incidents.length })}
+        subtitle={t('history.detail')}
       >
         {incidents.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>✓</Text>
-            <Text style={styles.emptyTitle}>No incidents recorded</Text>
-            <Text style={styles.emptyBody}>Your monitoring sessions will remain private and quiet here.</Text>
+            <Text style={styles.emptyTitle}>{t('history.emptyTitle')}</Text>
+            <Text style={styles.emptyBody}>{t('history.emptyBody')}</Text>
           </View>
         ) : (
           incidents.map((incident) => (
@@ -46,7 +48,7 @@ export default function HistoryScreen() {
               <View style={styles.copy}>
                 <Text style={styles.summary}>{incident.summary}</Text>
                 <Text style={styles.meta}>
-                  {new Date(incident.createdAt).toLocaleString()} · {incident.evidenceStatus}
+                  {new Date(incident.createdAt).toLocaleString(languageTag)} · {incident.evidenceStatus}
                 </Text>
               </View>
               <Text style={styles.chevron}>›</Text>
@@ -88,4 +90,3 @@ const styles = StyleSheet.create({
   meta: { color: colors.textMuted, fontSize: type.caption, marginTop: 4, textTransform: 'capitalize' },
   chevron: { color: colors.textMuted, fontSize: 28 },
 });
-

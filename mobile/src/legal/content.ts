@@ -1,7 +1,7 @@
-export const PRIVACY_NOTICE_VERSION = '2026-07-20-v2';
-export const TERMS_VERSION = '2026-07-20-v2';
-export const PROCESSING_CONSENT_VERSION = '2026-07-v3';
-export const LEGAL_EFFECTIVE_DATE = '20 July 2026';
+export const PRIVACY_NOTICE_VERSION = '2026-07-23-v3';
+export const TERMS_VERSION = '2026-07-23-v3';
+export const PROCESSING_CONSENT_VERSION = '2026-07-v4';
+export const LEGAL_EFFECTIVE_DATE = '23 July 2026';
 
 const requiredValue = (value: string | undefined, placeholder: string) => value?.trim() || placeholder;
 
@@ -46,12 +46,13 @@ export const privacySections: LegalSection[] = [
     bullets: [
       'Emergency-contact name and phone number: stored on your device so SafeCity can prepare an SOS message addressed to the people you choose.',
       'Monitoring-session identifiers: created and stored only in the encrypted database on your device so assessment windows and incident history remain separate.',
-      'Short microphone windows: approximately one second of PCM audio is processed in memory by the model bundled in the app during a monitoring session. Monitoring audio is not cached, uploaded or sent to a laptop, server or cloud.',
+      'Short microphone windows: approximately one second of PCM audio is processed in memory by the model bundled in the app during a monitoring session. The latest 15 seconds also remain in a volatile RAM ring buffer and are discarded unless an SOS is confirmed.',
+      'Optional voice keyword trigger: if you enable it, SafeCity passes the existing 16 kHz monitoring stream through its bundled quantized “Help” / “Bachao” keyword model. Audio and detection stay on the phone; no operating-system speech service, account, language-pack download or network recognition is used.',
       'Motion features: acceleration, jerk, rotation, free-fall and impact features are calculated and combined with audio results on your device. Ordinary assessment windows are not retained.',
       'Context: hour of day and whether the app is active are used only as bounded assessment context. They do not create a threat by themselves.',
-      'Location: the latest available coordinates may be held locally during monitoring and attached to an incident. Location is not used by the bundled inference model.',
+      'Location: the latest available coordinates may be held locally during monitoring and attached to an incident. Location is not used by the bundled inference model. If you choose “Load real nearby places” in Safety Navigator, the current coordinates are sent to the OpenStreetMap Overpass service to retrieve nearby mapped facilities and lighting tags.',
       'Incident records: time, risk result, factors, model version, location if available, evidence status and your false-alarm feedback are stored in the encrypted local database.',
-      'SOS evidence: after an SOS, while the capture screen is visible, SafeCity may collect one rear photo, one front photo and 15 seconds of audio. These files are AES-GCM encrypted and kept only in app-private storage.',
+      'SOS evidence: when an SOS is confirmed, SafeCity may encrypt the latest 15-second pre-alert RAM snapshot. While the capture screen is visible it may also collect one rear photo, one front photo and 15 seconds of post-SOS audio. These files are AES-GCM encrypted and kept only in app-private storage.',
       'Consent and legal records: notice version, terms version, adult confirmation and acceptance timestamps are retained locally to record your choices.',
     ],
   },
@@ -68,6 +69,7 @@ export const privacySections: LegalSection[] = [
       'Monitoring audio, motion features, assessment context and risk calculations stay on this device. SafeCity does not transmit them to a laptop, inference server or cloud service.',
       'An SMS recipient and your telecom or messaging provider receive the message and any included location only if you press Send in the system composer.',
       'A mapping provider receives coordinates only if you choose to open the incident location.',
+      'The OpenStreetMap Overpass service receives the current coordinates only if you choose to load real nearby places in Safety Navigator. Its response is used on that screen and is not saved to SafeCity history.',
       'Operating-system vendors process permission, notification and device-security data under their own notices.',
       'SafeCity does not sell personal data, use it for advertising or provide it to data brokers.',
     ],
@@ -75,7 +77,7 @@ export const privacySections: LegalSection[] = [
   {
     title: '5. Retention and deletion',
     bullets: [
-      'Raw monitoring audio and ordinary assessment windows: kept only in volatile memory while the bundled model and fusion rules run, then discarded.',
+      'Raw monitoring audio and ordinary assessment windows: kept only in volatile memory while the bundled model and fusion rules run. The rolling 15-second buffer is discarded when monitoring stops unless an SOS is confirmed and the snapshot is encrypted as evidence.',
       'Incidents and encrypted evidence: kept for the retention period you choose in Settings, from 1 to 90 days; the default is 30 days. You can delete an incident sooner.',
       'Emergency contacts and consent records: kept until you remove them, withdraw consent or erase app data.',
       'Latest background location: overwritten by newer location data and erased with app data. Monitoring stops when you stop or withdraw consent.',
@@ -152,7 +154,7 @@ export const termsSections: LegalSection[] = [
   {
     title: '5. Evidence, location and third-party services',
     paragraphs: [
-      'Evidence collection is limited by mobile operating systems and may work only while SafeCity is visible. Location, camera, microphone, notifications, mapping and SMS depend on third-party platforms and may be interrupted or inaccurate.',
+      'Evidence collection is limited by mobile operating systems and may work only while SafeCity is visible. Location, camera, microphone, the bundled keyword engine, OpenStreetMap place data, notifications, mapping and SMS may be interrupted, incomplete or inaccurate.',
       'Third-party services have their own terms and privacy notices. SafeCity does not claim that an SMS was delivered merely because the composer opened.',
     ],
   },

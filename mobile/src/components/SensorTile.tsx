@@ -1,9 +1,9 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { type ColorValue, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { HealthState } from '@/types/domain';
 
-const healthColor: Record<HealthState, string> = {
+const healthColor: Record<HealthState, ColorValue> = {
   ready: colors.safe,
   degraded: colors.alert,
   blocked: colors.danger,
@@ -35,4 +35,3 @@ const styles = StyleSheet.create({
   detail: { color: colors.textMuted, fontSize: type.caption, marginTop: 4 },
   state: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginTop: 'auto' },
 });
-

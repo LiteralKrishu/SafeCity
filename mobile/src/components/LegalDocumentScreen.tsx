@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
+import { useLocalization } from '@/i18n/localization-provider';
 import type { LegalSection } from '@/legal/content';
 import {
   LEGAL_EFFECTIVE_DATE,
@@ -22,24 +23,27 @@ export function LegalDocumentScreen({
   sections: LegalSection[];
 }) {
   const router = useRouter();
+  const { language, t } = useLocalization();
 
   return (
     <Screen
       eyebrow={eyebrow}
       title={title}
       right={
-        <Pressable accessibilityRole="button" accessibilityLabel={`Close ${title}`} onPress={() => router.back()}>
-          <Text style={styles.close}>Close</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${t('legal.close')} ${title}`} onPress={() => router.back()}>
+          <Text style={styles.close}>{t('legal.close')}</Text>
         </Pressable>
       }
     >
-      <Text style={styles.version}>Version {version} · Effective {LEGAL_EFFECTIVE_DATE}</Text>
+      <Text style={styles.version}>{t('legal.version', { version, date: LEGAL_EFFECTIVE_DATE })}</Text>
+
+      {language !== 'en' ? <Text style={styles.languageNotice}>{t('legal.englishNotice')}</Text> : null}
 
       {!legalConfigurationComplete ? (
         <View accessibilityRole="alert" style={styles.releaseBlocker}>
-          <Text style={styles.releaseBlockerTitle}>Production release blocked</Text>
+          <Text style={styles.releaseBlockerTitle}>{t('legal.releaseBlocked')}</Text>
           <Text style={styles.releaseBlockerBody}>
-            The operator name, address, privacy contact, Grievance Officer and court jurisdiction must be configured before distribution.
+            {t('legal.releaseBody')}
           </Text>
         </View>
       ) : null}
@@ -66,6 +70,7 @@ export function LegalDocumentScreen({
 const styles = StyleSheet.create({
   close: { color: colors.watch, fontWeight: '800' },
   version: { color: colors.textMuted, fontSize: type.caption, marginBottom: spacing.md },
+  languageNotice: { color: colors.alert, fontSize: type.caption, lineHeight: 18, marginBottom: spacing.md },
   releaseBlocker: {
     borderWidth: 1,
     borderColor: colors.alert,

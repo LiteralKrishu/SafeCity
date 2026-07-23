@@ -1,7 +1,7 @@
 # SafeCity Privacy Notice
 
-**Version:** 2026-07-20-v2  
-**Effective date:** 20 July 2026  
+**Version:** 2026-07-23-v3
+**Effective date:** 23 July 2026
 **Status:** Production template — operator details must be completed before release
 
 > This notice is designed for the SafeCity architecture in this repository and for readiness under India’s Digital Personal Data Protection Act, 2023 (“DPDP Act”) and Digital Personal Data Protection Rules, 2025 (“DPDP Rules”). It is not a legal opinion or a guarantee of compliance. The deploying entity must obtain advice from qualified Indian counsel, complete every bracketed field, validate the actual deployment, and maintain the operational controls described here.
@@ -29,13 +29,14 @@ This notice applies to the SafeCity mobile app and personal data processed for S
 |---|---|---|---|
 | Emergency-contact name and phone number | Prepare an SOS message to people chosen by the user | SQLCipher-encrypted database on the device | Until removed, consent is withdrawn or app data is erased |
 | Monitoring-session identifier | Keep local assessment windows and incident history separate | SQLCipher-encrypted database and volatile memory on the device | Until app-data erasure; volatile fusion state expires after one hour or session stop |
-| Approximately one second of microphone PCM per inference window | Detect possible distress during a user-started monitoring session | Volatile device memory and the model bundled in the APK; never sent to a laptop, server or cloud | Discarded after the assessment attempt; not written to app cache or durable storage |
+| Approximately one second of microphone PCM per inference window and a rolling 15-second tail | Detect possible distress and preserve a pre-alert snapshot only after a confirmed SOS | Volatile device memory and the model bundled in the APK; never sent to a laptop, server or cloud | Assessment windows are discarded; the RAM tail is discarded unless encrypted as SOS evidence |
+| Optional “Help” / “Bachao” keyword detection | Allow hands-free SOS while monitoring | SafeCity’s bundled quantized keyword model consumes the existing 16 kHz in-memory monitoring stream; no operating-system speech service, account, language-pack download or network recognition is used | The detected keyword label is transient and is not stored in incident history |
 | Motion features, including acceleration, jerk, rotation, free-fall and impact | Detect fall or struggle patterns and reduce false alarms | Calculated and fused in volatile memory on the device | Ordinary windows are discarded; incident factors follow incident retention |
 | Hour of day and app foreground/background state | Bounded assessment context that cannot create a threat by itself | Volatile device memory only | Assessment attempt only |
-| Latest available coordinates and accuracy | Attach location to an active incident or SOS | Encrypted device database; excluded from model inference | Overwritten by newer location and removed with app data; incident coordinate follows incident retention |
+| Latest available coordinates and accuracy | Attach location to an incident; retrieve nearby mapped facilities/lighting only when requested | Encrypted device database and, after the user requests real nearby places, OpenStreetMap Overpass; excluded from model inference | Overwritten by newer location and removed with app data; nearby-place responses are screen-only |
 | Monitoring-session status and timestamps | Operate start, pause, resume and stop controls | Encrypted device database | Until app-data erasure |
 | Incident metadata, risk result, factors, model version, location and feedback | Display local history, explain the alert, support safety review and deletion | Encrypted device database | User-selected 1–90 days; default 30 days; earlier deletion available |
-| One rear photo, one front photo and 15 seconds of audio after an SOS | Preserve user-authorised incident evidence | AES-GCM encrypted in app-private device storage | Same period as the incident; earlier deletion available |
+| Latest 15-second pre-alert WAV, one rear photo, one front photo and 15 seconds of post-SOS audio | Preserve user-authorised incident evidence after SOS confirmation | AES-GCM encrypted in app-private device storage | Same period as the incident; earlier deletion available |
 | Consent, adult confirmation and legal-document versions/timestamps | Record the user’s choices and demonstrate the notice shown | Encrypted device database | Until withdrawal or app-data erasure |
 | Technical health and error information | Show degraded sensors and diagnose local failures | Primarily transient on the device; no analytics SDK is included | The operator must document any production crash-reporting retention if such a tool is later added |
 
@@ -55,8 +56,9 @@ Personal data may be handled by:
 
 1. **The mobile operating-system provider.** It supplies permissions, protected key storage, notifications, camera, microphone, motion and location functions under its own terms.
 2. **SMS and telecom providers and chosen recipients.** They receive message content and any included coordinate only after the user presses **Send**.
-3. **A mapping provider.** It receives incident coordinates only if the user chooses to open a map link.
-4. **Authorities or other recipients required by law.** The operator may disclose data where legally required and will document the legal basis.
+3. **A mapping provider.** It receives coordinates only if the user chooses to open a map link.
+4. **OpenStreetMap Overpass.** It receives current coordinates only if the user chooses to load real nearby place and lighting records in Safety Navigator.
+5. **Authorities or other recipients required by law.** The operator may disclose data where legally required and will document the legal basis.
 
 No cloud analytics, advertising SDK or SafeCity-hosted evidence upload exists in this repository.
 
@@ -66,7 +68,7 @@ The supported SafeCity inference path stays inside the user’s phone. Operating
 
 ## 7. Retention and erasure
 
-- Raw monitoring windows and ordinary inference results are held only in volatile device memory and discarded after each assessment attempt.
+- Raw monitoring windows and ordinary inference results are held only in volatile device memory. The rolling 15-second tail is discarded when monitoring stops unless a confirmed SOS encrypts it as evidence.
 - Incidents and encrypted evidence follow the retention period selected in Settings (1–90 days, default 30) and can be deleted individually at any time.
 - Contacts and consent records remain until removed, consent is withdrawn or app data is erased.
 - Data may be retained longer only where a law requires it. The operator must document that law and segregate restricted records.
@@ -123,7 +125,7 @@ This build is restricted to people aged 18 or older and does not implement verif
 
 ## 13. Language and accessibility
 
-The production operator must make consent requests and notices available in clear, plain language and provide the language choices required by section 6(3) of the DPDP Act. This repository currently supplies English only; localisation, professional legal translation and accessibility testing are release requirements.
+The production operator must make consent requests and notices available in clear, plain language and provide the language choices required by section 6(3) of the DPDP Act. The app includes English, Hindi and Bengali UI strings, but professional legal translation and accessibility testing remain release requirements.
 
 ## 14. Changes
 

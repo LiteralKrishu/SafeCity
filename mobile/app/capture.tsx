@@ -7,6 +7,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getIncident, listContacts, updateIncidentEvidence } from '@/db/repository';
+import { useLocalization } from '@/i18n/localization-provider';
 import { encryptEvidenceFile } from '@/services/evidence';
 import { useMonitoring } from '@/services/MonitoringProvider';
 import { sendIncidentSms } from '@/services/sms';
@@ -21,6 +22,7 @@ export default function CaptureScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const monitoring = useMonitoring();
+  const { t } = useLocalization();
   const [cameraPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const captureBusy = useRef(false);
@@ -32,7 +34,7 @@ export default function CaptureScreen() {
   const [audioDone, setAudioDone] = useState(false);
   const [photosDone, setPhotosDone] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [message, setMessage] = useState('Preparing protected capture…');
+  const [message, setMessage] = useState(() => t('capture.preparing'));
   const audioRecorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, directory: 'document' });
 
   useEffect(() => {
@@ -47,12 +49,12 @@ export default function CaptureScreen() {
       try {
         const permission = await AudioModule.getRecordingPermissionsAsync();
         if (!permission.granted) {
-          setMessage('Microphone permission is blocked. Capturing available photos only.');
+          setMessage(t('capture.microphoneBlocked'));
           return;
         }
         await audioRecorder.prepareToRecordAsync();
         audioRecorder.record();
-        setMessage('Recording 15 seconds of incident audio…');
+        setMessage(t('capture.recording'));
         await wait(15_000);
         if (cancelled) return;
         await audioRecorder.stop();
@@ -60,7 +62,7 @@ export default function CaptureScreen() {
           setAudioUri(await encryptEvidenceFile(audioRecorder.uri, incidentId, 'incident-audio'));
         }
       } catch {
-        setMessage('Audio capture was interrupted. Securing available evidence.');
+        setMessage(t('capture.audioInterrupted'));
       } finally {
         if (!cancelled) setAudioDone(true);
       }
@@ -70,15 +72,15 @@ export default function CaptureScreen() {
       cancelled = true;
       if (audioRecorder.isRecording) void audioRecorder.stop();
     };
-  }, [audioRecorder, incidentId]);
+  }, [audioRecorder, incidentId, t]);
 
   useEffect(() => {
     if (cameraPermission && !cameraPermission.granted) {
       setPhotosDone(true);
       setPhase('photos_done');
-      setMessage('Camera permission is blocked. Securing available audio only.');
+      setMessage(t('capture.cameraBlocked'));
     }
-  }, [cameraPermission]);
+  }, [cameraPermission, t]);
 
   const captureCurrentCamera = useCallback(async () => {
     if (captureBusy.current || !cameraRef.current || !incidentId || phase === 'photos_done') return;
@@ -89,26 +91,26 @@ export default function CaptureScreen() {
       if (phase === 'rear') {
         setRearUri(await encryptEvidenceFile(photo.uri, incidentId, 'rear-photo'));
         setPhase('front');
-        setMessage('Rear photo secured. Capturing front camera…');
+        setMessage(t('capture.rearSecured'));
       } else {
         setFrontUri(await encryptEvidenceFile(photo.uri, incidentId, 'front-photo'));
         setPhase('photos_done');
         setPhotosDone(true);
-        setMessage('Both photos secured. Finishing audio capture…');
+        setMessage(t('capture.photosSecured'));
       }
     } catch {
       if (phase === 'rear') {
         setPhase('front');
-        setMessage('Rear camera was unavailable. Trying front camera…');
+        setMessage(t('capture.rearUnavailable'));
       } else {
         setPhase('photos_done');
         setPhotosDone(true);
-        setMessage('Camera capture was interrupted. Securing available evidence.');
+        setMessage(t('capture.cameraInterrupted'));
       }
     } finally {
       captureBusy.current = false;
     }
-  }, [incidentId, phase]);
+  }, [incidentId, phase, t]);
 
   useEffect(() => {
     if (!audioDone || !photosDone || finalized.current || !incidentId) return;
@@ -151,14 +153,14 @@ export default function CaptureScreen() {
       <View style={styles.content}>
         <View style={styles.badge}>
           <View style={styles.liveDot} />
-          <Text style={styles.badgeText}>SOS EVIDENCE CAPTURE</Text>
+          <Text style={styles.badgeText}>{t('capture.badge')}</Text>
         </View>
         <View style={styles.center}>
           <View style={styles.progressRing}>
             <Text style={styles.countdown}>{Math.max(15 - elapsed, 0)}</Text>
-            <Text style={styles.seconds}>seconds</Text>
+            <Text style={styles.seconds}>{t('capture.seconds')}</Text>
           </View>
-          <Text style={styles.title}>Stay aware of your surroundings</Text>
+          <Text style={styles.title}>{t('capture.stayAware')}</Text>
           <Text style={styles.message}>{message}</Text>
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${Math.min(progress, 100)}%` }]} />
@@ -168,7 +170,7 @@ export default function CaptureScreen() {
         <View style={styles.privacyCard}>
           <Text style={styles.lock}>▣</Text>
           <Text style={styles.privacyText}>
-            Evidence is encrypted on this device. It is not uploaded by SafeCity.
+            {t('capture.privacy')}
           </Text>
         </View>
       </View>

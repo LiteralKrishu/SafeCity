@@ -16,6 +16,17 @@ SafeCity estimates whether short audio and motion windows resemble a possible pe
 
 YAMNet is a broad environmental-sound classifier, not a purpose-trained women's-safety model. Its raw scores must never be interpreted as calibrated emergency probabilities.
 
+### Voice keyword model
+
+- Model: Sherpa-ONNX `sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20`
+- Input: the existing single-channel 16 kHz monitoring PCM stream
+- Runtime subset: 4.4 MB int8 encoder, 743 KB decoder, 85 KB int8 joiner, token table, and keyword definitions
+- Role: emit only `HELP`, `BACHAO`, or no detection while the user-enabled trigger is armed
+- Deployment: bundled in the app, copied to app-private cache, one CPU thread, serialized streaming inference, no account or operating-system language pack
+- Pronunciation coverage: one CMU-phone sequence for “Help”, plus three CMU-phone paths and one pinyin-token acoustic path for “Bachao”
+
+This is open-vocabulary acoustic keyword spotting, not general transcription. A bundled model broadens hardware support but does not make detection universal or guaranteed.
+
 ### Motion model
 
 The app converts Expo DeviceMotion acceleration from m/s² to g, then derives peak acceleration, RMS jerk, RMS rotation, free fall, and an ordered free-fall → impact feature. These signals are deterministic and device-dependent. A fall alone creates an Alert, not an automatic SOS.
@@ -44,6 +55,8 @@ The included unit tests demonstrate policy behavior, not real-world model accura
 A consented, documented set must include:
 
 - authentic and safely acted screams, shouts, cries, panic speech, and ordinary speech;
+- “Help” and “Bachao” spoken by consented users across Indian languages, accents, ages, speaking volumes, distances, phone orientations, and background noise;
+- phonetically similar words, ordinary conversations containing “help,” television/radio speech, and long non-trigger recordings for false-activation measurement;
 - television, films, social media, games, music, sirens, crowds, traffic, celebrations, and children playing;
 - phones dropped on varied surfaces, running, stairs, transit, cycling, exercise, stumbling, falls, and struggle simulations;
 - different languages, accents, ages, device microphones, cases, clothing/pockets, rooms, outdoor environments, and signal-to-noise ratios;
@@ -60,6 +73,7 @@ These are starting points for safety review, not universal guarantees:
 - fused-event precision at least 0.95 for automatic SOS on the held-out scripted set;
 - recall at least 0.90 for predefined synchronized distress scenarios;
 - P95 on-device decision latency below 1.5 seconds after a complete input window on supported hardware;
+- keyword false activations reported per monitored hour and keyword recall reported separately for each accent/noise/device group;
 - subgroup gaps reviewed and no modality launched where harm is unacceptable;
 - signed threshold/config rollback tested before pilot.
 
@@ -72,6 +86,8 @@ These are starting points for safety review, not universal guarantees:
 - A model-load or native-runtime failure disables pretrained audio inference and leaves motion-only fallback plus manual SOS.
 - Thresholds have not been calibrated on representative field data.
 - Mobile OS background restrictions prevent guaranteed continuous execution.
+- A short common keyword such as “Help” can occur in ordinary conversation or played media, while whispered, distant, masked, or unfamiliar pronunciations may be missed.
+- The keyword runtime targets the app's supported Android/iOS devices, but low-memory hardware, unsupported CPU/OS combinations, thermal throttling, and vendor background limits can still disable or delay it.
 
 ## Feedback and privacy
 

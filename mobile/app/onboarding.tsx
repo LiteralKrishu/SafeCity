@@ -19,6 +19,7 @@ import { ActionButton } from '@/components/ActionButton';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { addContact, listContacts, readSettings, writeSettings } from '@/db/repository';
+import { useLocalization } from '@/i18n/localization-provider';
 import {
   PRIVACY_NOTICE_VERSION,
   PROCESSING_CONSENT_VERSION,
@@ -29,27 +30,18 @@ import { requestCorePermissions } from '@/services/permissions';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { EmergencyContact } from '@/types/domain';
 
-const consentItems = [
-  'I understand SafeCity is an assistive tool and cannot guarantee detection or emergency response.',
-  'I consent to local audio and motion analysis only while I start a monitoring session.',
-  'I consent to one front photo, one rear photo, and 15 seconds of audio being encrypted locally after an SOS.',
-] as const;
-
-const legalItems = [
-  'I confirm that I am at least 18 years old.',
-  'I have read the Privacy Notice, including the itemised data and purpose information.',
-  'I agree to the Terms and Conditions.',
-] as const;
-
 export default function OnboardingScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const { t } = useLocalization();
   const insets = useSafeAreaInsets();
+  const consentItems = [t('onboarding.consentOne'), t('onboarding.consentTwo'), t('onboarding.consentThree')];
+  const legalItems = [t('onboarding.legalOne'), t('onboarding.legalTwo'), t('onboarding.legalThree')];
   const [consents, setConsents] = useState([false, false, false]);
   const [legalAcceptances, setLegalAcceptances] = useState([false, false, false]);
   const [consentVisible, setConsentVisible] = useState(false);
   const [permissionsRequested, setPermissionsRequested] = useState(false);
-  const [permissionSummary, setPermissionSummary] = useState('Not reviewed yet');
+  const [permissionSummary, setPermissionSummary] = useState(() => t('onboarding.notReviewed'));
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -75,10 +67,10 @@ export default function OnboardingScreen() {
       const result = await requestCorePermissions();
       await Notifications.requestPermissionsAsync();
       const granted = Object.values(result).filter(Boolean).length;
-      setPermissionSummary(`${granted} of ${Object.keys(result).length} safety permissions allowed`);
+      setPermissionSummary(t('onboarding.permissionsCount', { granted, total: Object.keys(result).length }));
       setPermissionsRequested(true);
     } catch {
-      setPermissionSummary('Some permissions were unavailable. You can review them again.');
+      setPermissionSummary(t('onboarding.permissionsUnavailable'));
       setPermissionsRequested(true);
     } finally {
       setPermissionsBusy(false);
@@ -94,11 +86,11 @@ export default function OnboardingScreen() {
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
     if (!cleanName) {
-      setContactError('Enter the contact’s name.');
+      setContactError(t('onboarding.nameError'));
       return;
     }
     if (cleanPhone.length < 5) {
-      setContactError('Enter a valid phone number, including the country code.');
+      setContactError(t('onboarding.phoneError'));
       return;
     }
 
@@ -111,7 +103,7 @@ export default function OnboardingScreen() {
       await refreshContacts();
       setConsentVisible(true);
     } catch {
-      setContactError('The contact could not be saved. Please try again.');
+      setContactError(t('onboarding.contactSaveError'));
     } finally {
       setContactBusy(false);
     }
@@ -140,34 +132,34 @@ export default function OnboardingScreen() {
 
   return (
     <>
-      <Screen eyebrow="Private by design" title="Set up SafeCity">
+      <Screen eyebrow={t('onboarding.eyebrow')} title={t('onboarding.title')}>
         <View style={styles.intro}>
-          <Text style={styles.hero}>Three quick steps before you start.</Text>
+          <Text style={styles.hero}>{t('onboarding.hero')}</Text>
           <Text style={styles.body}>
-            Choose sensor access, save an emergency contact, then review exactly what SafeCity may analyze and store.
+            {t('onboarding.body')}
           </Text>
           <View style={styles.progressRow}>
-            <StepPill label="Sensors" complete={permissionsRequested} />
-            <StepPill label="Contact" complete={contacts.length > 0} />
-            <StepPill label="Consent" complete={consentComplete} />
+            <StepPill label={t('onboarding.sensors')} complete={permissionsRequested} />
+            <StepPill label={t('onboarding.contact')} complete={contacts.length > 0} />
+            <StepPill label={t('onboarding.consent')} complete={consentComplete} />
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>1 · Enable safety sensors</Text>
-        <Card title="Choose protection access" subtitle="You stay in control and can change permissions later in Settings.">
+        <Text style={styles.sectionLabel}>{t('onboarding.stepSensors')}</Text>
+        <Card title={t('onboarding.accessTitle')} subtitle={t('onboarding.accessDetail')}>
           <View style={styles.locationCallout}>
-            <Text style={styles.locationTitle}>Location: choose “Allow all the time”</Text>
+            <Text style={styles.locationTitle}>{t('onboarding.locationTitle')}</Text>
             <Text style={styles.locationBody}>
-              This is preferable for more reliable location coverage during an active monitoring session, even when SafeCity is not on screen.
+              {t('onboarding.locationBody')}
             </Text>
           </View>
           <View style={styles.cardAction}>
             <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>Current status</Text>
+              <Text style={styles.statusLabel}>{t('onboarding.currentStatus')}</Text>
               <Text style={[styles.status, permissionsRequested && styles.statusReady]}>{permissionSummary}</Text>
             </View>
             <ActionButton
-              label={permissionsRequested ? 'Review sensor permissions' : 'Choose sensor permissions'}
+              label={permissionsRequested ? t('onboarding.reviewPermissions') : t('onboarding.choosePermissions')}
               onPress={() => void requestPermissions()}
               variant="secondary"
               loading={permissionsBusy}
@@ -175,18 +167,18 @@ export default function OnboardingScreen() {
           </View>
         </Card>
 
-        <Text style={styles.sectionLabel}>2 · Add an emergency contact</Text>
+        <Text style={styles.sectionLabel}>{t('onboarding.stepContact')}</Text>
         <Card
-          title="Who should be ready to help?"
-          subtitle="A saved contact is immediately included when SafeCity prepares an SOS message. No verification step is required."
+          title={t('onboarding.contactTitle')}
+          subtitle={t('onboarding.contactDetail')}
         >
           <View style={styles.form}>
             <View>
-              <Text style={styles.inputLabel}>Contact name</Text>
+              <Text style={styles.inputLabel}>{t('onboarding.contactName')}</Text>
               <TextInput
                 accessibilityLabel="Emergency contact name"
                 autoCapitalize="words"
-                placeholder="e.g. Alex"
+                placeholder={t('onboarding.contactNamePlaceholder')}
                 placeholderTextColor={colors.textMuted}
                 value={name}
                 onChangeText={(value) => {
@@ -197,10 +189,10 @@ export default function OnboardingScreen() {
               />
             </View>
             <View>
-              <Text style={styles.inputLabel}>Phone number</Text>
+              <Text style={styles.inputLabel}>{t('onboarding.phone')}</Text>
               <TextInput
                 accessibilityLabel="Emergency contact phone number"
-                placeholder="Include country code"
+                placeholder={t('onboarding.phonePlaceholder')}
                 placeholderTextColor={colors.textMuted}
                 keyboardType="phone-pad"
                 textContentType="telephoneNumber"
@@ -217,7 +209,7 @@ export default function OnboardingScreen() {
               <Text accessibilityRole="alert" style={styles.errorText}>{contactError}</Text>
             ) : null}
             <ActionButton
-              label="Save contact and continue"
+              label={t('onboarding.saveContact')}
               onPress={() => void addNewContact()}
               variant="secondary"
               loading={contactBusy}
@@ -226,7 +218,7 @@ export default function OnboardingScreen() {
 
           {contacts.length > 0 ? (
             <View style={styles.savedContacts}>
-              <Text style={styles.savedHeading}>Ready for SOS</Text>
+              <Text style={styles.savedHeading}>{t('onboarding.readyForSos')}</Text>
               {contacts.map((contact) => (
                 <View key={contact.id} style={styles.contactRow}>
                   <View style={styles.contactAvatar}>
@@ -236,32 +228,32 @@ export default function OnboardingScreen() {
                     <Text style={styles.contactName}>{contact.name}</Text>
                     <Text style={styles.contactPhone}>{contact.phone}</Text>
                   </View>
-                  <Text style={styles.readyBadge}>Saved</Text>
+                  <Text style={styles.readyBadge}>{t('onboarding.saved')}</Text>
                 </View>
               ))}
             </View>
           ) : null}
         </Card>
 
-        <Text style={styles.sectionLabel}>3 · Review and consent</Text>
+        <Text style={styles.sectionLabel}>{t('onboarding.stepConsent')}</Text>
         <Card>
           <View style={styles.consentSummary}>
             <View style={[styles.summaryIcon, consentComplete && styles.summaryIconComplete]}>
               <Text style={styles.summaryIconText}>{consentComplete ? '✓' : '3'}</Text>
             </View>
             <View style={styles.summaryCopy}>
-              <Text style={styles.summaryTitle}>{consentComplete ? 'Consent confirmed' : 'Final confirmation'}</Text>
+              <Text style={styles.summaryTitle}>{consentComplete ? t('onboarding.consentConfirmed') : t('onboarding.finalConfirmation')}</Text>
               <Text style={styles.summaryBody}>
                 {contacts.length > 0
-                  ? 'Review the processing notice, age requirement and terms before finishing setup.'
-                  : 'Save an emergency contact first. The consent confirmation will open next.'}
+                  ? t('onboarding.consentReadyBody')
+                  : t('onboarding.consentLockedBody')}
               </Text>
             </View>
           </View>
           {contacts.length > 0 ? (
             <View style={styles.cardAction}>
               <ActionButton
-                label={consentComplete ? 'Review consent' : 'Review and confirm'}
+                label={consentComplete ? t('onboarding.reviewConsent') : t('onboarding.reviewConfirm')}
                 onPress={() => setConsentVisible(true)}
                 variant="secondary"
               />
@@ -271,15 +263,15 @@ export default function OnboardingScreen() {
 
         <View style={styles.finish}>
           <ActionButton
-            label="Finish setup"
+            label={t('onboarding.finish')}
             onPress={() => void finish()}
             disabled={!canFinish}
             loading={finishBusy}
           />
           {!canFinish ? (
-            <Text style={styles.hint}>Save a contact, review the legal documents and confirm every statement.</Text>
+            <Text style={styles.hint}>{t('onboarding.finishHint')}</Text>
           ) : (
-            <Text style={styles.readyHint}>You’re ready to use SafeCity.</Text>
+            <Text style={styles.readyHint}>{t('onboarding.ready')}</Text>
           )}
         </View>
       </Screen>
@@ -301,17 +293,17 @@ export default function OnboardingScreen() {
           <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
             <View style={styles.sheetHandle} />
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.sheetEyebrow}>Final step</Text>
-              <Text style={styles.sheetTitle}>Understand and consent</Text>
+              <Text style={styles.sheetEyebrow}>{t('onboarding.finalStep')}</Text>
+              <Text style={styles.sheetTitle}>{t('onboarding.understandTitle')}</Text>
               <Text style={styles.sheetBody}>
-                Review the processing purposes and legal documents, then confirm every statement with a separate affirmative action.
+                {t('onboarding.understandBody')}
               </Text>
 
               {!legalConfigurationComplete ? (
                 <View accessibilityRole="alert" style={styles.legalWarning}>
-                  <Text style={styles.legalWarningTitle}>Prototype legal configuration</Text>
+                  <Text style={styles.legalWarningTitle}>{t('onboarding.prototypeTitle')}</Text>
                   <Text style={styles.legalWarningBody}>
-                    The deploying operator’s identity and grievance contacts are not configured. Do not distribute this build as a production service.
+                    {t('onboarding.prototypeBody')}
                   </Text>
                 </View>
               ) : null}
@@ -322,14 +314,14 @@ export default function OnboardingScreen() {
                   onPress={() => openLegalDocument('/legal/privacy')}
                   style={styles.legalLinkButton}
                 >
-                  <Text style={styles.legalLinkText}>Read Privacy Notice</Text>
+                  <Text style={styles.legalLinkText}>{t('onboarding.readPrivacy')}</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="link"
                   onPress={() => openLegalDocument('/legal/terms')}
                   style={styles.legalLinkButton}
                 >
-                  <Text style={styles.legalLinkText}>Read Terms</Text>
+                  <Text style={styles.legalLinkText}>{t('onboarding.readTerms')}</Text>
                 </Pressable>
               </View>
 
@@ -354,7 +346,7 @@ export default function OnboardingScreen() {
                 ))}
               </View>
 
-              <Text style={styles.legalHeading}>Age and legal acceptance</Text>
+              <Text style={styles.legalHeading}>{t('onboarding.ageLegal')}</Text>
               <View style={styles.consentList}>
                 {legalItems.map((item, index) => (
                   <Pressable
@@ -378,7 +370,7 @@ export default function OnboardingScreen() {
 
               <View style={styles.sheetActions}>
                 <ActionButton
-                  label="Confirm consent"
+                  label={t('onboarding.confirmConsent')}
                   onPress={() => setConsentVisible(false)}
                   disabled={!consentComplete}
                 />
@@ -387,7 +379,7 @@ export default function OnboardingScreen() {
                   onPress={() => setConsentVisible(false)}
                   style={styles.notNowButton}
                 >
-                  <Text style={styles.notNowText}>Not now</Text>
+                  <Text style={styles.notNowText}>{t('onboarding.notNow')}</Text>
                 </Pressable>
               </View>
             </ScrollView>

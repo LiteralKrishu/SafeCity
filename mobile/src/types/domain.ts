@@ -1,6 +1,14 @@
+import type { LanguagePreference } from '@/i18n/types';
+
 export type RiskLevel = 'safe' | 'watch' | 'alert' | 'sos_pending' | 'sos';
 export type SessionState = 'idle' | 'monitoring' | 'paused';
 export type HealthState = 'ready' | 'degraded' | 'blocked' | 'offline' | 'checking';
+export type VoiceTriggerStatus =
+  | 'disabled'
+  | 'checking'
+  | 'listening'
+  | 'unavailable'
+  | 'error';
 
 export interface SensorHealth {
   microphone: HealthState;
@@ -49,6 +57,7 @@ export interface Incident {
   matchedPatterns: RetrievedPattern[];
   latitude: number | null;
   longitude: number | null;
+  snapshotAudioUri: string | null;
   rearPhotoUri: string | null;
   frontPhotoUri: string | null;
   audioUri: string | null;
@@ -78,4 +87,7 @@ export interface AppSettings {
   retentionDays: number;
   discreetMode: boolean;
   backgroundLocation: boolean;
+  voiceKeywordEnabled: boolean;
+  language: LanguagePreference;
+  appearance: 'system' | 'dark' | 'light';
 }

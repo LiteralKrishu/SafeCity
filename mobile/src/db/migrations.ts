@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 
 export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -44,6 +44,7 @@ export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
       patterns_json TEXT NOT NULL,
       latitude REAL,
       longitude REAL,
+      snapshot_audio_uri TEXT,
       rear_photo_uri TEXT,
       front_photo_uri TEXT,
       audio_uri TEXT,
@@ -58,6 +59,13 @@ export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS incidents_state_idx ON incidents(state);
   `);
 
+  if (currentVersion < 2 && currentVersion > 0) {
+    try {
+      await db.execAsync('ALTER TABLE incidents ADD COLUMN snapshot_audio_uri TEXT;');
+    } catch {
+      // Older installs may already have this column from a partial upgrade.
+    }
+  }
+
   await db.runAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
 }
-

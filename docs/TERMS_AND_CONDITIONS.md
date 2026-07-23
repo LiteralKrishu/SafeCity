@@ -1,7 +1,7 @@
 # SafeCity Terms and Conditions
 
-**Version:** 2026-07-20-v2  
-**Effective date:** 20 July 2026  
+**Version:** 2026-07-23-v3
+**Effective date:** 23 July 2026
 **Status:** Production template — operator details and legal review required
 
 > These Terms are a deployment template, not legal advice. The deploying entity must complete every bracketed field and obtain review from qualified Indian counsel, including review under the Indian Contract Act, 1872, Consumer Protection Act, 2019, DPDP Act and any health, emergency, telecom or state law applicable to the final service.
@@ -25,9 +25,10 @@ You must have authority to provide an emergency contact’s name and number. You
 SafeCity may, when you start monitoring and allow the relevant permissions:
 
 - analyze short-lived microphone windows and device-motion features;
+- optionally detect “Help” or “Bachao” through SafeCity’s bundled offline keyword model;
 - use limited context and location for safety assessment and incidents;
 - request a check-in or escalate to an SOS capture flow;
-- collect one rear photo, one front photo and 15 seconds of audio after an SOS while the capture screen is visible;
+- encrypt the latest 15-second pre-alert snapshot after SOS confirmation and collect one rear photo, one front photo and 15 seconds of post-SOS audio while the capture screen is visible;
 - encrypt incident evidence locally;
 - open an SMS composer addressed to saved emergency contacts; and
 - display local incident history and deletion controls.
@@ -62,7 +63,7 @@ You must not use SafeCity to surveil another person, record or track unlawfully,
 
 Operating-system permissions are optional, but denied access degrades features. “Allow all the time” location access is preferable for active monitoring coverage, but it is not mandatory for manual SOS.
 
-Camera evidence can normally be captured only while SafeCity is visible. Evidence remains encrypted in app-private storage unless you deliberately share or export it. An SMS or map action invokes a third-party app governed by that provider’s terms. Carrier or data charges may apply. SafeCity does not claim delivery merely because a composer or map opened.
+Camera evidence can normally be captured only while SafeCity is visible. Evidence remains encrypted in app-private storage unless you deliberately share or export it. Keyword accuracy, power use, and background continuity vary by device even though inference is bundled and offline. An SMS, map action, or user-requested OpenStreetMap nearby-place lookup invokes a third-party service governed by that provider’s terms. Carrier or data charges may apply. SafeCity does not claim delivery merely because a composer or map opened.
 
 ## 7. Privacy
 

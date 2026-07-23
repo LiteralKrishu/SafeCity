@@ -5,8 +5,11 @@
     "scheme": "safecity",
     "version": "2.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
-    "platforms": ["ios", "android"],
+    "userInterfaceStyle": "automatic",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.safecity.mobile",
@@ -14,7 +17,10 @@
         "usesNonExemptEncryption": false
       },
       "infoPlist": {
-        "UIBackgroundModes": ["audio", "location"]
+        "UIBackgroundModes": [
+          "audio",
+          "location"
+        ]
       }
     },
     "android": {
@@ -51,6 +57,7 @@
           "enableBackgroundPlayback": false
         }
       ],
+      "@siteed/sherpa-onnx.rn",
       [
         "expo-location",
         {
@@ -85,10 +92,18 @@
           "enableFTS": true,
           "useSQLCipher": true
         }
-      ]
+      ],
+      "expo-sharing",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "332c6ed5-2573-42bf-afa0-e1a27c8e575a"
+      }
     }
   }
 }

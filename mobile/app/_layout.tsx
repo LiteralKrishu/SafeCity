@@ -7,9 +7,11 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { DatabaseProvider } from '@/db/DatabaseProvider';
+import { LocalizationProvider } from '@/i18n/localization-provider';
 import { MonitoringProvider } from '@/services/MonitoringProvider';
 import { StartupMaintenance } from '@/services/StartupMaintenance';
 import { colors } from '@/theme/tokens';
+import { ThemeProvider, useTheme } from '@/theme/theme-provider';
 
 function LoadingScreen() {
   return (
@@ -19,24 +21,38 @@ function LoadingScreen() {
   );
 }
 
+function AppStack() {
+  const { resolvedAppearance } = useTheme();
+  return (
+    <>
+      <StatusBar style={resolvedAppearance === 'dark' ? 'light' : 'dark'} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: 'fade',
+        }}
+      >
+        <Stack.Screen name="capture" options={{ gestureEnabled: false, presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="sos-countdown" options={{ gestureEnabled: false, presentation: 'fullScreenModal' }} />
+      </Stack>
+    </>
+  );
+}
+
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <Suspense fallback={<LoadingScreen />}>
         <DatabaseProvider>
-          <StartupMaintenance />
-          <MonitoringProvider>
-            <StatusBar style="light" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.background },
-                animation: 'fade',
-              }}
-            >
-              <Stack.Screen name="capture" options={{ gestureEnabled: false, presentation: 'fullScreenModal' }} />
-            </Stack>
-          </MonitoringProvider>
+          <ThemeProvider>
+            <LocalizationProvider>
+              <StartupMaintenance />
+              <MonitoringProvider>
+                <AppStack />
+              </MonitoringProvider>
+            </LocalizationProvider>
+          </ThemeProvider>
         </DatabaseProvider>
       </Suspense>
     </SafeAreaProvider>

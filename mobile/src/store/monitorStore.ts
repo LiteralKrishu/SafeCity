@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 
-import type { Assessment, RiskLevel, SensorHealth, SessionState } from '@/types/domain';
+import type {
+  Assessment,
+  RiskLevel,
+  SensorHealth,
+  SessionState,
+  VoiceTriggerStatus,
+} from '@/types/domain';
 
 interface MonitorStore {
   sessionState: SessionState;
@@ -10,10 +16,21 @@ interface MonitorStore {
   latestAssessment: Assessment | null;
   health: SensorHealth;
   activeIncidentId: string | null;
+  telemetry: {
+    audioLevel: number;
+    audioUpdatedAt: number | null;
+    motion: { x: number; y: number; z: number; magnitudeG: number } | null;
+    motionUpdatedAt: number | null;
+    location: { latitude: number; longitude: number; accuracy: number | null } | null;
+    locationUpdatedAt: number | null;
+    voiceTriggerStatus: VoiceTriggerStatus;
+    voiceTriggerTranscript: string | null;
+  };
   setSession: (state: SessionState, id?: string | null) => void;
   setAssessment: (assessment: Assessment) => void;
   setHealth: (health: Partial<SensorHealth>) => void;
   setActiveIncident: (id: string | null) => void;
+  setTelemetry: (telemetry: Partial<MonitorStore['telemetry']>) => void;
   resetRisk: () => void;
 }
 
@@ -33,6 +50,16 @@ export const useMonitorStore = create<MonitorStore>((set) => ({
   latestAssessment: null,
   health: initialHealth,
   activeIncidentId: null,
+  telemetry: {
+    audioLevel: 0,
+    audioUpdatedAt: null,
+    motion: null,
+    motionUpdatedAt: null,
+    location: null,
+    locationUpdatedAt: null,
+    voiceTriggerStatus: 'disabled',
+    voiceTriggerTranscript: null,
+  },
   setSession: (sessionState, sessionId) => set({ sessionState, sessionId: sessionId ?? null }),
   setAssessment: (assessment) =>
     set({
@@ -42,6 +69,7 @@ export const useMonitorStore = create<MonitorStore>((set) => ({
     }),
   setHealth: (health) => set((state) => ({ health: { ...state.health, ...health } })),
   setActiveIncident: (activeIncidentId) => set({ activeIncidentId }),
+  setTelemetry: (telemetry) =>
+    set((state) => ({ telemetry: { ...state.telemetry, ...telemetry } })),
   resetRisk: () => set({ riskLevel: 'safe', score: 0, latestAssessment: null }),
 }));
-

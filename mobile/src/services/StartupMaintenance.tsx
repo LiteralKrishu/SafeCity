@@ -25,6 +25,7 @@ export function StartupMaintenance() {
       await db.withTransactionAsync(async () => {
         for (const incident of expired) {
           deleteEvidenceFiles([
+            incident.snapshotAudioUri,
             incident.rearPhotoUri,
             incident.frontPhotoUri,
             incident.audioUri,

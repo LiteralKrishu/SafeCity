@@ -23,6 +23,21 @@ async function getEvidenceKey(): Promise<AESEncryptionKey> {
   return key;
 }
 
+async function sealEvidenceBytes(
+  plaintext: Uint8Array,
+  incidentId: string,
+  outputName: string,
+): Promise<string> {
+  const key = await getEvidenceKey();
+  const sealed = await aesEncryptAsync(plaintext, key);
+  const encryptedBytes = await sealed.combined();
+
+  const output = new File(incidentDirectory(incidentId), `${outputName}.safe`);
+  output.create({ overwrite: true, intermediates: true });
+  output.write(encryptedBytes);
+  return output.uri;
+}
+
 function incidentDirectory(incidentId: string): Directory {
   const directory = new Directory(Paths.document, 'evidence', incidentId);
   directory.create({ idempotent: true, intermediates: true });
@@ -36,15 +51,17 @@ export async function encryptEvidenceFile(
 ): Promise<string> {
   const source = new File(sourceUri);
   const plaintext = await source.bytes();
-  const key = await getEvidenceKey();
-  const sealed = await aesEncryptAsync(plaintext, key);
-  const encryptedBytes = await sealed.combined();
-
-  const output = new File(incidentDirectory(incidentId), `${outputName}.safe`);
-  output.create({ overwrite: true, intermediates: true });
-  output.write(encryptedBytes);
+  const outputUri = await sealEvidenceBytes(plaintext, incidentId, outputName);
   if (source.exists) source.delete();
-  return output.uri;
+  return outputUri;
+}
+
+export async function encryptEvidenceBytes(
+  plaintext: Uint8Array,
+  incidentId: string,
+  outputName: string,
+): Promise<string> {
+  return sealEvidenceBytes(plaintext, incidentId, outputName);
 }
 
 export async function decryptEvidenceToCache(

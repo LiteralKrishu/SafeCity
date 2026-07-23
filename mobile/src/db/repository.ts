@@ -22,6 +22,9 @@ export const defaultSettings: AppSettings = {
   retentionDays: 30,
   discreetMode: true,
   backgroundLocation: true,
+  voiceKeywordEnabled: false,
+  language: 'system',
+  appearance: 'system',
 };
 
 export async function readSettings(db: SQLiteDatabase): Promise<AppSettings> {
@@ -142,30 +145,52 @@ export async function createIncident(
   assessment: Assessment,
   sessionId: string | null,
   location: { latitude: number; longitude: number } | null,
-  source: 'automatic' | 'manual' = 'automatic',
+  source: 'automatic' | 'manual' | 'voice' = 'automatic',
 ): Promise<string> {
   const id = Crypto.randomUUID();
   const summary =
-    source === 'manual' ? 'Manual SOS activated' : assessment.explanation || 'Possible distress detected';
+    source === 'manual'
+      ? 'Manual SOS activated'
+      : source === 'voice'
+        ? 'Voice keyword SOS activated'
+        : assessment.explanation || 'Possible distress detected';
+  const directSos = source !== 'automatic';
   await db.runAsync(
     `INSERT INTO incidents (
        id, session_id, created_at, state, risk_score, summary, factors_json, patterns_json,
-       latitude, longitude, evidence_status, model_version
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       latitude, longitude, snapshot_audio_uri, rear_photo_uri, front_photo_uri, audio_uri,
+       evidence_status, model_version
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     sessionId,
     new Date().toISOString(),
-    source === 'manual' ? 'sos' : assessment.riskLevel,
-    source === 'manual' ? 1 : assessment.fusedScore,
+    directSos ? 'sos' : assessment.riskLevel,
+    directSos ? 1 : assessment.fusedScore,
     summary,
-    JSON.stringify(source === 'manual' ? ['Manual SOS'] : assessment.factors),
-    JSON.stringify(source === 'manual' ? [] : assessment.matchedPatterns),
+    JSON.stringify(assessment.factors),
+    JSON.stringify(directSos ? [] : assessment.matchedPatterns),
     location?.latitude ?? null,
     location?.longitude ?? null,
+    null,
+    null,
+    null,
+    null,
     'pending',
-    source === 'manual' ? 'manual-v1' : assessment.modelVersion,
+    assessment.modelVersion,
   );
   return id;
+}
+
+export async function updateIncidentSnapshotUri(
+  db: SQLiteDatabase,
+  incidentId: string,
+  snapshotAudioUri: string | null,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE incidents SET snapshot_audio_uri = ? WHERE id = ?',
+    snapshotAudioUri,
+    incidentId,
+  );
 }
 
 export async function updateIncidentEvidence(
@@ -201,6 +226,7 @@ interface IncidentRow {
   patterns_json: string;
   latitude: number | null;
   longitude: number | null;
+  snapshot_audio_uri: string | null;
   rear_photo_uri: string | null;
   front_photo_uri: string | null;
   audio_uri: string | null;
@@ -222,6 +248,7 @@ function mapIncident(row: IncidentRow): Incident {
     matchedPatterns: JSON.parse(row.patterns_json) as Incident['matchedPatterns'],
     latitude: row.latitude,
     longitude: row.longitude,
+    snapshotAudioUri: row.snapshot_audio_uri,
     rearPhotoUri: row.rear_photo_uri,
     frontPhotoUri: row.front_photo_uri,
     audioUri: row.audio_uri,
