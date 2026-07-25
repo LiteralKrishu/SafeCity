@@ -8,11 +8,14 @@ import type {
   Incident,
   RiskLevel,
 } from '@/types/domain';
+import { clearStoredLanguagePreference } from '@/i18n/language-storage';
+import { isInferenceModelPreference } from '@/inference/modelProfiles';
 
 const SETTINGS_KEY = 'app-settings';
 
 export const defaultSettings: AppSettings = {
   onboardingComplete: false,
+  monitoringEnabled: false,
   consentVersion: null,
   consentGrantedAt: null,
   privacyNoticeVersion: null,
@@ -23,6 +26,10 @@ export const defaultSettings: AppSettings = {
   discreetMode: true,
   backgroundLocation: true,
   voiceKeywordEnabled: false,
+  anonymousRiskSharingEnabled: false,
+  anonymousRiskConsentGrantedAt: null,
+  behaviorBaselineEnabled: false,
+  inferenceModel: 'auto',
   language: 'system',
   appearance: 'system',
 };
@@ -37,7 +44,20 @@ export async function readSettings(db: SQLiteDatabase): Promise<AppSettings> {
   try {
     const stored = JSON.parse(row.value) as Partial<AppSettings> & { serviceUrl?: string };
     const { serviceUrl: _retiredServiceUrl, ...currentSettings } = stored;
-    return { ...defaultSettings, ...currentSettings };
+    return {
+      ...defaultSettings,
+      ...currentSettings,
+      // Existing installations monitored automatically after onboarding.
+      // Preserve that user-visible behavior when migrating to the explicit
+      // background-protection switch.
+      monitoringEnabled:
+        currentSettings.monitoringEnabled ??
+        currentSettings.onboardingComplete ??
+        defaultSettings.monitoringEnabled,
+      inferenceModel: isInferenceModelPreference(currentSettings.inferenceModel)
+        ? currentSettings.inferenceModel
+        : defaultSettings.inferenceModel,
+    };
   } catch {
     return defaultSettings;
   }
@@ -116,8 +136,12 @@ export async function eraseAllLocalData(db: SQLiteDatabase): Promise<void> {
     await db.runAsync('DELETE FROM incidents');
     await db.runAsync('DELETE FROM sessions');
     await db.runAsync('DELETE FROM contacts');
+    await db.runAsync('DELETE FROM anonymous_risk_queue');
+    await db.runAsync('DELETE FROM behavior_baseline');
+    await db.runAsync('DELETE FROM behavior_baseline_days');
     await db.runAsync('DELETE FROM settings');
   });
+  await clearStoredLanguagePreference();
 }
 
 export async function startSession(db: SQLiteDatabase): Promise<string> {
@@ -211,6 +235,20 @@ export async function updateIncidentEvidence(
     evidence.frontPhotoUri,
     evidence.audioUri,
     evidence.status,
+    incidentId,
+  );
+}
+
+export async function updateIncidentLocation(
+  db: SQLiteDatabase,
+  incidentId: string,
+  latitude: number,
+  longitude: number,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE incidents SET latitude = ?, longitude = ? WHERE id = ?',
+    latitude,
+    longitude,
     incidentId,
   );
 }

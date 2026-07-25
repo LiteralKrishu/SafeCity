@@ -6,8 +6,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getIncident, listContacts, updateIncidentEvidence } from '@/db/repository';
+import {
+  getIncident,
+  listContacts,
+  updateIncidentEvidence,
+  updateIncidentLocation,
+} from '@/db/repository';
 import { useLocalization } from '@/i18n/localization-provider';
+import { getPreciseCurrentLocation } from '@/services/backgroundLocation';
 import { encryptEvidenceFile } from '@/services/evidence';
 import { useMonitoring } from '@/services/MonitoringProvider';
 import { sendIncidentSms } from '@/services/sms';
@@ -15,18 +21,55 @@ import { colors, radii, spacing, type } from '@/theme/tokens';
 
 type CapturePhase = 'rear' | 'front' | 'photos_done';
 
-const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+type BoundedResult<T> =
+  | { ok: true; value: T }
+  | { ok: false };
+
+const CAPTURE_SECONDS = 15;
+const CAPTURE_WATCHDOG_MS = 27_000;
+const OPERATION_TIMEOUT_MS = 5_000;
+
+const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+function settleWithin<T>(promise: Promise<T>, milliseconds: number): Promise<BoundedResult<T>> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ ok: false });
+    }, milliseconds);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve({ ok: true, value });
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve({ ok: false });
+      },
+    );
+  });
+}
 
 export default function CaptureScreen() {
   const { incidentId } = useLocalSearchParams<{ incidentId: string }>();
   const db = useSQLiteContext();
   const router = useRouter();
-  const monitoring = useMonitoring();
+  const { resumeAfterEvidence, suspendForEvidence } = useMonitoring();
   const { t } = useLocalization();
   const [cameraPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const captureBusy = useRef(false);
+  const captureExpired = useRef(false);
   const finalized = useRef(false);
+  const preciseLocationUpdate = useRef<Promise<void>>(Promise.resolve());
+  const monitoringSuspension = useRef<Promise<void>>(Promise.resolve());
   const [phase, setPhase] = useState<CapturePhase>('rear');
   const [rearUri, setRearUri] = useState<string | null>(null);
   const [frontUri, setFrontUri] = useState<string | null>(null);
@@ -38,28 +81,87 @@ export default function CaptureScreen() {
   const audioRecorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, directory: 'document' });
 
   useEffect(() => {
-    void monitoring.suspendForEvidence();
-    const interval = setInterval(() => setElapsed((value) => Math.min(value + 1, 15)), 1_000);
-    return () => clearInterval(interval);
-  }, [monitoring]);
+    if (!incidentId) return;
+    preciseLocationUpdate.current = getPreciseCurrentLocation()
+      .then(async (location) => {
+        if (!location) return;
+        await updateIncidentLocation(
+          db,
+          incidentId,
+          location.latitude,
+          location.longitude,
+        );
+      })
+      .catch(() => undefined);
+  }, [db, incidentId]);
+
+  useEffect(() => {
+    monitoringSuspension.current = suspendForEvidence().catch(() => undefined);
+    const interval = setInterval(
+      () => setElapsed((value) => Math.min(value + 1, CAPTURE_SECONDS)),
+      1_000,
+    );
+    const watchdog = setTimeout(() => {
+      if (finalized.current) return;
+      captureExpired.current = true;
+      setPhase('photos_done');
+      setPhotosDone(true);
+      setAudioDone(true);
+      setMessage(t('capture.audioInterrupted'));
+      if (audioRecorder.isRecording) {
+        void audioRecorder.stop().catch(() => undefined);
+      }
+    }, CAPTURE_WATCHDOG_MS);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(watchdog);
+    };
+  }, [audioRecorder, suspendForEvidence, t]);
 
   useEffect(() => {
     let cancelled = false;
     const recordEvidence = async () => {
       try {
-        const permission = await AudioModule.getRecordingPermissionsAsync();
-        if (!permission.granted) {
+        await settleWithin(monitoringSuspension.current, OPERATION_TIMEOUT_MS);
+        const permission = await settleWithin(
+          AudioModule.getRecordingPermissionsAsync(),
+          OPERATION_TIMEOUT_MS,
+        );
+        if (!permission.ok || !permission.value.granted) {
           setMessage(t('capture.microphoneBlocked'));
           return;
         }
-        await audioRecorder.prepareToRecordAsync();
-        audioRecorder.record();
+        const prepared = await settleWithin(
+          audioRecorder.prepareToRecordAsync(),
+          OPERATION_TIMEOUT_MS,
+        );
+        if (!prepared.ok || cancelled || captureExpired.current) {
+          setMessage(t('capture.audioInterrupted'));
+          return;
+        }
+        audioRecorder.record({ forDuration: CAPTURE_SECONDS });
         setMessage(t('capture.recording'));
-        await wait(15_000);
-        if (cancelled) return;
-        await audioRecorder.stop();
+        await wait(CAPTURE_SECONDS * 1_000 + 350);
+        if (cancelled || captureExpired.current) return;
+
+        if (audioRecorder.isRecording) {
+          const stopped = await settleWithin(audioRecorder.stop(), OPERATION_TIMEOUT_MS);
+          if (!stopped.ok) {
+            setMessage(t('capture.audioInterrupted'));
+            return;
+          }
+        }
+
         if (audioRecorder.uri && incidentId) {
-          setAudioUri(await encryptEvidenceFile(audioRecorder.uri, incidentId, 'incident-audio'));
+          const encrypted = await settleWithin(
+            encryptEvidenceFile(audioRecorder.uri, incidentId, 'incident-audio'),
+            OPERATION_TIMEOUT_MS,
+          );
+          if (encrypted.ok && !cancelled && !captureExpired.current) {
+            setAudioUri(encrypted.value);
+          } else if (!encrypted.ok) {
+            setMessage(t('capture.audioInterrupted'));
+          }
         }
       } catch {
         setMessage(t('capture.audioInterrupted'));
@@ -70,7 +172,9 @@ export default function CaptureScreen() {
     void recordEvidence();
     return () => {
       cancelled = true;
-      if (audioRecorder.isRecording) void audioRecorder.stop();
+      if (audioRecorder.isRecording) {
+        void audioRecorder.stop().catch(() => undefined);
+      }
     };
   }, [audioRecorder, incidentId, t]);
 
@@ -83,17 +187,40 @@ export default function CaptureScreen() {
   }, [cameraPermission, t]);
 
   const captureCurrentCamera = useCallback(async () => {
-    if (captureBusy.current || !cameraRef.current || !incidentId || phase === 'photos_done') return;
+    if (
+      captureBusy.current ||
+      captureExpired.current ||
+      !cameraRef.current ||
+      !incidentId ||
+      phase === 'photos_done'
+    ) {
+      return;
+    }
     captureBusy.current = true;
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.72, exif: false });
-      if (!photo?.uri) throw new Error('No photo returned');
+      const captured = await settleWithin(
+        cameraRef.current.takePictureAsync({ quality: 0.72, exif: false }),
+        OPERATION_TIMEOUT_MS,
+      );
+      if (!captured.ok || !captured.value?.uri || captureExpired.current) {
+        throw new Error('No photo returned');
+      }
       if (phase === 'rear') {
-        setRearUri(await encryptEvidenceFile(photo.uri, incidentId, 'rear-photo'));
+        const encrypted = await settleWithin(
+          encryptEvidenceFile(captured.value.uri, incidentId, 'rear-photo'),
+          OPERATION_TIMEOUT_MS,
+        );
+        if (!encrypted.ok || captureExpired.current) throw new Error('Rear photo unavailable');
+        setRearUri(encrypted.value);
         setPhase('front');
         setMessage(t('capture.rearSecured'));
       } else {
-        setFrontUri(await encryptEvidenceFile(photo.uri, incidentId, 'front-photo'));
+        const encrypted = await settleWithin(
+          encryptEvidenceFile(captured.value.uri, incidentId, 'front-photo'),
+          OPERATION_TIMEOUT_MS,
+        );
+        if (!encrypted.ok || captureExpired.current) throw new Error('Front photo unavailable');
+        setFrontUri(encrypted.value);
         setPhase('photos_done');
         setPhotosDone(true);
         setMessage(t('capture.photosSecured'));
@@ -116,26 +243,55 @@ export default function CaptureScreen() {
     if (!audioDone || !photosDone || finalized.current || !incidentId) return;
     finalized.current = true;
     const finalize = async () => {
+      setMessage(t('capture.finishing'));
+      await settleWithin(preciseLocationUpdate.current, OPERATION_TIMEOUT_MS);
       const capturedCount = [rearUri, frontUri, audioUri].filter(Boolean).length;
       const status = capturedCount === 3 ? 'secured' : capturedCount > 0 ? 'partial' : 'unavailable';
-      await updateIncidentEvidence(db, incidentId, {
-        rearPhotoUri: rearUri,
-        frontPhotoUri: frontUri,
-        audioUri,
-        status,
-      });
-      const [incident, contacts] = await Promise.all([getIncident(db, incidentId), listContacts(db)]);
-      if (incident && contacts.length > 0) {
-        await sendIncidentSms(contacts, incident).catch(() => false);
+      await settleWithin(
+        updateIncidentEvidence(db, incidentId, {
+          rearPhotoUri: rearUri,
+          frontPhotoUri: frontUri,
+          audioUri,
+          status,
+        }),
+        OPERATION_TIMEOUT_MS,
+      );
+      const details = await settleWithin(
+        Promise.all([getIncident(db, incidentId), listContacts(db)]),
+        OPERATION_TIMEOUT_MS,
+      );
+      if (details.ok) {
+        const [incident, contacts] = details.value;
+        if (incident && contacts.length > 0) {
+          // Opening the system composer can remain pending until the user sends or
+          // cancels. Keep it independent from capture navigation.
+          void sendIncidentSms(contacts, incident).catch(() => false);
+        }
       }
-      await monitoring.resumeAfterEvidence();
+      void resumeAfterEvidence().catch(() => undefined);
       router.replace({ pathname: '/incident/[id]', params: { id: incidentId } });
     };
-    void finalize();
-  }, [audioDone, audioUri, db, frontUri, incidentId, monitoring, photosDone, rearUri, router]);
+    void finalize().catch(() => {
+      void resumeAfterEvidence().catch(() => undefined);
+      router.replace({ pathname: '/incident/[id]', params: { id: incidentId } });
+    });
+  }, [
+    audioDone,
+    audioUri,
+    db,
+    frontUri,
+    incidentId,
+    photosDone,
+    rearUri,
+    resumeAfterEvidence,
+    router,
+    t,
+  ]);
 
   const facing = phase === 'front' ? 'front' : 'back';
-  const progress = Math.round((([rearUri, frontUri].filter(Boolean).length + elapsed / 15) / 3) * 100);
+  const progress = Math.round(
+    (([rearUri, frontUri].filter(Boolean).length + elapsed / CAPTURE_SECONDS) / 3) * 100,
+  );
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -157,7 +313,7 @@ export default function CaptureScreen() {
         </View>
         <View style={styles.center}>
           <View style={styles.progressRing}>
-            <Text style={styles.countdown}>{Math.max(15 - elapsed, 0)}</Text>
+            <Text style={styles.countdown}>{Math.max(CAPTURE_SECONDS - elapsed, 0)}</Text>
             <Text style={styles.seconds}>{t('capture.seconds')}</Text>
           </View>
           <Text style={styles.title}>{t('capture.stayAware')}</Text>

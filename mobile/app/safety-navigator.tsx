@@ -1,20 +1,46 @@
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  Linking,
+  Modal,
+  Platform,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionButton } from '@/components/ActionButton';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
+import { SafetyMap } from '@/components/SafetyMap';
 import { useLocalization } from '@/i18n/localization-provider';
+import {
+  getCurrentLocation,
+  getPreciseCurrentLocation,
+  type SafeCityLocationFix,
+} from '@/services/backgroundLocation';
+import {
+  fetchRiskZones,
+  isRiskServiceConfigured,
+  type RiskZoneSnapshot,
+} from '@/services/riskZones';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import {
   fetchNearbySafetyRadar,
+  fetchWalkingRoute,
   formatDistance,
+  formatWalkingDuration,
   makeMapsDirectionUrl,
-  radarPosition,
+  nearestSafeHavens,
   summarizeSafeCorridor,
   type SafeHavenPin,
+  type WalkingRoute,
 } from '@/utils/safeRoute';
 
 type DestinationCategory = 'police' | 'hospital' | 'metro' | 'pharmacy';
@@ -35,26 +61,56 @@ const categories: Array<{
 export default function SafetyNavigatorScreen() {
   const router = useRouter();
   const { t } = useLocalization();
+  const { height: windowHeight } = useWindowDimensions();
   const [selected, setSelected] = useState<DestinationCategory>('police');
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [location, setLocation] = useState<SafeCityLocationFix | null>(null);
   const [loading, setLoading] = useState(false);
   const [safeHavens, setSafeHavens] = useState<SafeHavenPin[]>([]);
+  const [selectedHavenId, setSelectedHavenId] = useState<string | null>(null);
+  const [mapExpanded, setMapExpanded] = useState(false);
   const [havensLoading, setHavensLoading] = useState(false);
-  const [havensLoaded, setHavensLoaded] = useState(false);
   const [havensError, setHavensError] = useState<string | null>(null);
+  const [walkingRoute, setWalkingRoute] = useState<WalkingRoute | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [riskSnapshot, setRiskSnapshot] = useState<RiskZoneSnapshot | null>(null);
+  const [riskZonesLoading, setRiskZonesLoading] = useState(false);
+  const [riskZonesError, setRiskZonesError] = useState<string | null>(null);
+  const routeRequestId = useRef(0);
+  const locationRequestId = useRef(0);
   const [mappedContext, setMappedContext] = useState({
     mappedLitPathSegments: 0,
     emergencyPhones: 0,
   });
-  const corridor = useMemo(() => summarizeSafeCorridor(safeHavens), [safeHavens]);
-  const safestHaven = safeHavens[0] ?? null;
+  const nearestHavens = useMemo(
+    () => nearestSafeHavens(safeHavens, selected),
+    [safeHavens, selected],
+  );
+  const corridor = useMemo(() => summarizeSafeCorridor(nearestHavens), [nearestHavens]);
+  const nearestHaven = nearestHavens[0] ?? null;
+  const selectedHaven =
+    nearestHavens.find((haven) => haven.id === selectedHavenId) ?? nearestHaven;
+  const mappedHavens = useMemo(() => {
+    const visibleRadius = Math.max(700, (selectedHaven?.distanceMeters ?? 0) * 1.15);
+    const nearestWithinRadius = nearestHavens
+      .filter((haven) => haven.distanceMeters <= visibleRadius)
+      .slice(0, 5);
+    if (selectedHaven && !nearestWithinRadius.some((haven) => haven.id === selectedHaven.id)) {
+      nearestWithinRadius.push(selectedHaven);
+    }
+    return nearestWithinRadius.length ? nearestWithinRadius : nearestHavens.slice(0, 1);
+  }, [nearestHavens, selectedHaven]);
 
   const chosenCategory = useMemo(
     () => categories.find((category) => category.id === selected) ?? categories[0]!,
     [selected],
   );
 
-  const refreshLocation = async (requestPermission = true) => {
+  const refreshLocation = async (
+    requestPermission = true,
+  ): Promise<SafeCityLocationFix | null> => {
+    const requestId = locationRequestId.current + 1;
+    locationRequestId.current = requestId;
     setLoading(true);
     try {
       let permission = await Location.getForegroundPermissionsAsync();
@@ -62,83 +118,234 @@ export default function SafetyNavigatorScreen() {
         permission = await Location.requestForegroundPermissionsAsync();
       }
       if (!permission.granted) throw new Error('Location permission is required to search near you.');
-      const nextLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const nextLocation = await getCurrentLocation();
+      if (!nextLocation) throw new Error('A current GPS location could not be obtained.');
       setLocation(nextLocation);
       setSafeHavens([]);
+      setSelectedHavenId(null);
+      setMapExpanded(false);
       setMappedContext({ mappedLitPathSegments: 0, emergencyPhones: 0 });
-      setHavensLoaded(false);
       setHavensError(null);
+      setWalkingRoute(null);
+      setRouteError(null);
+      setRiskZonesError(null);
+      void getPreciseCurrentLocation()
+        .then((preciseLocation) => {
+          if (!preciseLocation || locationRequestId.current !== requestId) return;
+          setLocation((currentLocation) =>
+            currentLocation && preciseLocation.timestamp < currentLocation.timestamp
+              ? currentLocation
+              : preciseLocation,
+          );
+        })
+        .catch(() => undefined);
+      return nextLocation;
     } catch (error) {
       Alert.alert('Location unavailable', error instanceof Error ? error.message : 'Try again from phone settings.');
+      return null;
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    void refreshLocation(false);
-  }, []);
-
-  const loadNearbyHavens = async () => {
-    if (!location) {
-      await refreshLocation();
-      return;
-    }
+  const loadNearbyHavens = async (
+    providedLocation?: SafeCityLocationFix,
+  ): Promise<SafeHavenPin[]> => {
+    const activeLocation = providedLocation ?? location ?? (await refreshLocation());
+    if (!activeLocation) return [];
     setHavensLoading(true);
     setHavensError(null);
     try {
       const radarData = await fetchNearbySafetyRadar(
-        location.coords.latitude,
-        location.coords.longitude,
+        activeLocation.latitude,
+        activeLocation.longitude,
       );
       const pins = radarData.safeHavens;
       setSafeHavens(pins);
+      const nearestPin = nearestSafeHavens(pins, selected, 1)[0];
+      setSelectedHavenId(nearestPin?.id ?? null);
       setMappedContext(radarData.context);
-      setHavensLoaded(true);
       if (!pins.length) {
         setHavensError('No mapped police, hospital, metro, or pharmacy records were found within 3 km.');
       }
+      return pins;
     } catch (error) {
       setSafeHavens([]);
       setMappedContext({ mappedLitPathSegments: 0, emergencyPhones: 0 });
-      setHavensLoaded(true);
       setHavensError(
         error instanceof Error
           ? error.message
           : 'Nearby place data is unavailable. Use Maps search instead.',
       );
+      return [];
     } finally {
       setHavensLoading(false);
     }
   };
 
-  const openNearbySearch = async () => {
-    if (!location) {
-      await refreshLocation();
+  const loadRiskZoneLayer = async (
+    activeLocation: SafeCityLocationFix,
+  ): Promise<void> => {
+    if (!isRiskServiceConfigured()) {
+      setRiskSnapshot(null);
       return;
     }
-    const { latitude, longitude } = location.coords;
-    const query = encodeURIComponent(`${chosenCategory.query} near ${latitude},${longitude}`);
-    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+    setRiskZonesLoading(true);
+    setRiskZonesError(null);
+    try {
+      setRiskSnapshot(await fetchRiskZones(activeLocation));
+    } catch (error) {
+      setRiskSnapshot(null);
+      setRiskZonesError(
+        error instanceof Error
+          ? error.message
+          : 'Community risk zones are temporarily unavailable.',
+      );
+    } finally {
+      setRiskZonesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void (async () => {
+      const activeLocation = await refreshLocation(true);
+      if (activeLocation) {
+        await Promise.all([
+          loadNearbyHavens(activeLocation),
+          loadRiskZoneLayer(activeLocation),
+        ]);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    const selectedIsVisible = nearestHavens.some(
+      (haven) => haven.id === selectedHavenId,
+    );
+    if (!selectedIsVisible) {
+      setSelectedHavenId(nearestHaven?.id ?? null);
+    }
+  }, [nearestHaven?.id, nearestHavens, selectedHavenId]);
+
+  useEffect(() => {
+    const requestId = routeRequestId.current + 1;
+    routeRequestId.current = requestId;
+    if (!location || !selectedHaven) {
+      setWalkingRoute(null);
+      setRouteLoading(false);
+      setRouteError(null);
+      return;
+    }
+
+    setWalkingRoute(null);
+    setRouteLoading(true);
+    setRouteError(null);
+    void fetchWalkingRoute(
+      location.latitude,
+      location.longitude,
+      selectedHaven.latitude,
+      selectedHaven.longitude,
+    )
+      .then((route) => {
+        if (routeRequestId.current === requestId) setWalkingRoute(route);
+      })
+      .catch((error) => {
+        if (routeRequestId.current !== requestId) return;
+        setRouteError(
+          error instanceof Error
+            ? error.message
+            : 'A walking route could not be loaded for this destination.',
+        );
+      })
+      .finally(() => {
+        if (routeRequestId.current === requestId) setRouteLoading(false);
+      });
+  }, [location, selectedHaven]);
+
+  const refreshNearbyMap = async () => {
+    const activeLocation = await refreshLocation();
+    if (activeLocation) {
+      await Promise.all([
+        loadNearbyHavens(activeLocation),
+        loadRiskZoneLayer(activeLocation),
+      ]);
+    }
+  };
+
+  const selectCategory = (category: DestinationCategory) => {
+    setSelected(category);
+    const nearestMatch = nearestSafeHavens(safeHavens, category, 1)[0];
+    setSelectedHavenId(nearestMatch?.id ?? null);
+  };
+
+  const openUrl = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Maps unavailable', 'No compatible maps app could open this destination.');
+    }
+  };
+
+  const openNearbySearch = async () => {
+    const activeLocation = location ?? (await refreshLocation());
+    if (!activeLocation) return;
+    const { latitude, longitude } = activeLocation;
+    const query = `${chosenCategory.query} near ${latitude},${longitude}`;
+    const deviceMapsUrl =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?q=${encodeURIComponent(query)}`
+        : `geo:${latitude},${longitude}?q=${encodeURIComponent(query)}`;
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    Alert.alert('Open outside SafeCity', `Search for ${chosenCategory.title.toLowerCase()} using:`, [
+      {
+        text: Platform.OS === 'ios' ? 'Apple Maps' : 'Device Maps',
+        onPress: () => void openUrl(deviceMapsUrl),
+      },
+      {
+        text: 'Google Maps',
+        onPress: () => void openUrl(googleMapsUrl),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const shareWalkCheckIn = async () => {
     if (!location) return;
-    const { latitude, longitude } = location.coords;
+    const { latitude, longitude } = location;
     await Share.share({
       message: `SafeCity walk check-in: I am at https://maps.google.com/?q=${latitude},${longitude}. Please check on me.`,
     });
   };
 
-  const openSafestCorridor = async () => {
-    if (!location || !safestHaven) {
-      await refreshLocation();
+  const openGoogleDirections = (haven: SafeHavenPin | null) => {
+    if (!location || !haven) return;
+    const { latitude, longitude } = location;
+    void openUrl(
+      makeMapsDirectionUrl(
+        latitude,
+        longitude,
+        haven.latitude,
+        haven.longitude,
+      ),
+    );
+  };
+
+  const openInAppMap = async (category?: DestinationCategory) => {
+    const activeLocation = location ?? (await refreshLocation());
+    if (!activeLocation) return;
+    let pins = safeHavens;
+    if (!pins.length) pins = await loadNearbyHavens(activeLocation);
+    const activeCategory = category ?? selected;
+    const nextPin = nearestSafeHavens(pins, activeCategory, 1)[0] ?? null;
+    setSelectedHavenId(nextPin?.id ?? null);
+    if (!nextPin) {
+      Alert.alert(
+        `No mapped ${chosenCategory.title.toLowerCase()} nearby`,
+        'SafeCity found no matching OpenStreetMap record within 3 km. You can still search in your maps app.',
+      );
       return;
     }
-    const { latitude, longitude } = location.coords;
-    await Linking.openURL(
-      makeMapsDirectionUrl(latitude, longitude, safestHaven.latitude, safestHaven.longitude),
-    );
+    setMapExpanded(true);
   };
 
   return (
@@ -151,157 +358,228 @@ export default function SafetyNavigatorScreen() {
         </Pressable>
       }
     >
-      <View style={styles.hero}>
-        <Text style={styles.heroIcon}>⌖</Text>
-        <Text style={styles.heroTitle}>{location ? 'Current location ready' : 'Location needed'}</Text>
-        <Text style={styles.heroBody}>
-          {location
-            ? `${location.coords.latitude.toFixed(5)}, ${location.coords.longitude.toFixed(5)} · ±${Math.round(location.coords.accuracy ?? 0)} m`
-            : 'Allow location to find staffed public places near your actual position.'}
-        </Text>
-      </View>
-
       <Card
-        title="Nearby staffed-place radar"
-        subtitle="Load mapped police, hospital, metro, pharmacy, lighting, and emergency-phone records. Priority uses place type, distance, listed hours, time of day, and nearby mapped lighting."
+        title="Live safe-walk map"
+        subtitle="SafeCity automatically finds nearby staffed places and draws a walking route to the selected pin."
       >
-        {location && havensLoaded && safeHavens.length ? (
+        {location ? (
           <>
-            <View style={styles.corridorSummary}>
-              <View>
-                <Text style={styles.corridorScore}>{corridor.score}%</Text>
-                <Text style={styles.corridorLabel}>{corridor.label}</Text>
+            <View style={styles.locationBar}>
+              <View style={styles.locationStatus}>
+                <View style={styles.locationDot} />
+                <View style={styles.locationCopy}>
+                  <Text style={styles.locationLabel}>LIVE LOCATION</Text>
+                  <Text style={styles.locationValue}>
+                    {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                    {' · '}±{Math.round(location.accuracy ?? 0)} m
+                  </Text>
+                </View>
               </View>
-              <Text style={styles.corridorDetail}>{corridor.detail}</Text>
+              <Pressable
+                accessibilityLabel="Refresh location and nearby places"
+                accessibilityRole="button"
+                onPress={() => void refreshNearbyMap()}
+                style={({ pressed }) => [styles.refreshButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.refreshText}>↻</Text>
+              </Pressable>
             </View>
-            <View style={styles.contextRow}>
-              <View style={styles.contextMetric}>
-                <Text style={styles.contextValue}>{mappedContext.mappedLitPathSegments}</Text>
-                <Text style={styles.contextLabel}>mapped lit path segments</Text>
-              </View>
-              <View style={styles.contextMetric}>
-                <Text style={styles.contextValue}>{mappedContext.emergencyPhones}</Text>
-                <Text style={styles.contextLabel}>mapped emergency phones</Text>
-              </View>
-            </View>
-            <View style={styles.radar}>
-              <View style={styles.radarHalo} />
-              <View style={styles.radarRing} />
-              <View style={styles.radarCenter} />
-              {safeHavens.map((haven) => {
-                const position = radarPosition(
-                  location.coords.latitude,
-                  location.coords.longitude,
-                  haven.latitude,
-                  haven.longitude,
-                );
-                return (
-                  <Pressable
-                    key={haven.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${haven.name}. ${formatDistance(haven.distanceMeters)} away.`}
-                    onPress={async () => {
-                      if (!location) return;
-                      await Linking.openURL(
-                        makeMapsDirectionUrl(
-                          location.coords.latitude,
-                          location.coords.longitude,
-                          haven.latitude,
-                          haven.longitude,
-                        ),
-                      );
-                    }}
-                    style={[
-                      styles.radarPin,
-                      {
-                        left: `${position.left}%`,
-                        top: `${position.top}%`,
-                        backgroundColor: haven.category === 'police' ? colors.dangerSoft : colors.safeSoft,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.radarPinIcon}>{haven.icon}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.havenList}>
-              {safeHavens.map((haven) => (
-                <Pressable
-                  key={haven.id}
-                  accessibilityRole="button"
-                  onPress={async () => {
-                    if (!location) return;
-                    await Linking.openURL(
-                      makeMapsDirectionUrl(
-                        location.coords.latitude,
-                        location.coords.longitude,
-                        haven.latitude,
-                        haven.longitude,
-                      ),
-                    );
-                  }}
-                  style={({ pressed }) => [styles.havenRow, pressed && styles.pressed]}
-                >
-                  <View style={styles.havenIcon}>
-                    <Text style={styles.havenIconText}>{haven.icon}</Text>
-                  </View>
-                  <View style={styles.havenCopy}>
-                    <Text style={styles.havenName}>{haven.name}</Text>
-                    <Text style={styles.havenDetail}>
-                      {haven.corridorLabel} · {formatDistance(haven.distanceMeters)} away
-                    </Text>
-                    {haven.openingHours ? (
-                      <Text style={styles.havenHours}>{haven.openingHours}</Text>
-                    ) : null}
-                    {haven.mappedLitSegmentsNearby > 0 ? (
-                      <Text style={styles.havenHours}>
-                        {haven.mappedLitSegmentsNearby} mapped lit path segment
-                        {haven.mappedLitSegmentsNearby === 1 ? '' : 's'} nearby
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Text style={styles.havenScore}>{Math.round(haven.corridorScore * 100)}%</Text>
-                </Pressable>
-              ))}
-            </View>
-            <ActionButton
-              label="Walk to highest-priority place"
-              variant="secondary"
-              onPress={() => void openSafestCorridor()}
+
+            <SafetyMap
+              center={{
+                latitude: location.latitude,
+                longitude: location.longitude,
+              }}
+              height={360}
+              onSelectPin={(haven) => setSelectedHavenId(haven.id)}
+              pins={mappedHavens}
+              riskZones={riskSnapshot?.zones}
+              route={walkingRoute?.coordinates}
+              routeLoading={routeLoading}
+              selectedPinId={selectedHaven?.id}
             />
+
+            <View style={styles.riskSummary}>
+              <View style={styles.riskLegend}>
+                <View style={[styles.riskLegendDot, styles.riskLegendEmerging]} />
+                <View style={[styles.riskLegendDot, styles.riskLegendElevated]} />
+                <View style={[styles.riskLegendDot, styles.riskLegendHigh]} />
+              </View>
+              <View style={styles.riskSummaryCopy}>
+                <Text style={styles.riskSummaryTitle}>Anonymous community risk zones</Text>
+                <Text style={styles.riskSummaryText}>
+                  {!isRiskServiceConfigured()
+                    ? 'Connect the risk aggregation service to show privacy-protected zones.'
+                    : riskZonesLoading
+                      ? 'Refreshing recent community distress patterns…'
+                      : riskZonesError
+                        ? riskZonesError
+                        : riskSnapshot?.zones.length
+                          ? `${riskSnapshot.zones.length} recent coarse zone${riskSnapshot.zones.length === 1 ? '' : 's'} shown. Exact locations and report counts stay hidden.`
+                          : `No area nearby reached the minimum crowd threshold${riskSnapshot ? ` of ${riskSnapshot.privacy.minimumReports} reports` : ''}.`}
+                </Text>
+              </View>
+            </View>
+
+            {havensLoading && !safeHavens.length ? (
+              <View style={styles.inlineStatus}>
+                <View style={styles.statusPulse} />
+                <Text style={styles.inlineStatusText}>Finding the nearest safe places...</Text>
+              </View>
+            ) : null}
+
+            {havensError ? (
+              <View style={styles.mapError}>
+                <Text style={styles.mapErrorTitle}>Nearby places could not be refreshed</Text>
+                <Text style={styles.mapErrorText}>{havensError}</Text>
+                <ActionButton
+                  label="Retry nearby places"
+                  loading={havensLoading}
+                  variant="secondary"
+                  onPress={() => void loadNearbyHavens()}
+                />
+              </View>
+            ) : null}
+
+            {!havensLoading &&
+            !havensError &&
+            safeHavens.length > 0 &&
+            nearestHavens.length === 0 ? (
+              <View style={styles.filterEmpty}>
+                <Text style={styles.filterEmptyTitle}>
+                  No mapped {chosenCategory.title.toLowerCase()} within 3 km
+                </Text>
+                <Text style={styles.filterEmptyText}>
+                  Choose another service or use “Search outside SafeCity” below.
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.mapPrivacy}>
+              <Text style={styles.mapPrivacyTitle}>Route stays inside SafeCity</Text>
+              <Text style={styles.mapPrivacyText}>
+                Tap any nearby pin to redraw the pedestrian route. SafeCity does not store your map
+                history.
+              </Text>
+            </View>
+
+            {selectedHaven ? (
+              <View style={styles.selectedHaven}>
+                <View style={styles.selectedHavenCopy}>
+                  <Text style={styles.selectedHavenLabel}>ACTIVE WALKING DESTINATION</Text>
+                  <Text style={styles.selectedHavenName}>{selectedHaven.name}</Text>
+                  <Text style={styles.selectedHavenDetail}>
+                    {routeLoading
+                      ? 'Calculating a pedestrian route...'
+                      : walkingRoute
+                        ? `${formatWalkingDuration(walkingRoute.durationSeconds)} walk · ${formatDistance(walkingRoute.distanceMeters)}`
+                        : `${formatDistance(selectedHaven.distanceMeters)} away`}
+                  </Text>
+                  {routeError ? <Text style={styles.routeError}>{routeError}</Text> : null}
+                </View>
+                <Text style={styles.selectedHavenIcon}>{selectedHaven.icon}</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.mapActions}>
+              <ActionButton
+                label="Open this route in Google Maps"
+                disabled={!selectedHaven}
+                onPress={() => openGoogleDirections(selectedHaven)}
+              />
+              <ActionButton
+                label="Expand the in-app map"
+                disabled={!selectedHaven}
+                variant="secondary"
+                onPress={() => void openInAppMap()}
+              />
+            </View>
+
+            {nearestHavens.length ? (
+              <>
+                <Text style={styles.nearestTitle}>
+                  NEAREST {chosenCategory.title.toUpperCase()}
+                </Text>
+                <View style={styles.havenList}>
+                  {nearestHavens.slice(0, 6).map((haven, index) => (
+                    <Pressable
+                      key={haven.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: haven.id === selectedHaven?.id }}
+                      onPress={() => setSelectedHavenId(haven.id)}
+                      style={({ pressed }) => [
+                        styles.havenRow,
+                        haven.id === selectedHaven?.id && styles.havenRowSelected,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <View style={styles.havenRank}>
+                        <Text style={styles.havenRankText}>{index + 1}</Text>
+                      </View>
+                      <View style={styles.havenIcon}>
+                        <Text style={styles.havenIconText}>{haven.icon}</Text>
+                      </View>
+                      <View style={styles.havenCopy}>
+                        <Text style={styles.havenName}>{haven.name}</Text>
+                        <Text style={styles.havenDetail}>
+                          {formatDistance(haven.distanceMeters)} away · {haven.corridorLabel}
+                        </Text>
+                        {haven.openingHours ? (
+                          <Text style={styles.havenHours}>{haven.openingHours}</Text>
+                        ) : null}
+                      </View>
+                      <Text style={styles.routeChevron}>›</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : null}
+
+            {nearestHavens.length ? (
+              <>
+                <View style={styles.corridorSummary}>
+                  <View>
+                    <Text style={styles.corridorScore}>{corridor.score}%</Text>
+                    <Text style={styles.corridorLabel}>{corridor.label}</Text>
+                  </View>
+                  <Text style={styles.corridorDetail}>{corridor.detail}</Text>
+                </View>
+                <View style={styles.contextRow}>
+                  <View style={styles.contextMetric}>
+                    <Text style={styles.contextValue}>{mappedContext.mappedLitPathSegments}</Text>
+                    <Text style={styles.contextLabel}>mapped lit path segments</Text>
+                  </View>
+                  <View style={styles.contextMetric}>
+                    <Text style={styles.contextValue}>{mappedContext.emergencyPhones}</Text>
+                    <Text style={styles.contextLabel}>mapped emergency phones</Text>
+                  </View>
+                </View>
+              </>
+            ) : null}
+
             <Pressable
               accessibilityRole="link"
               onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
               style={({ pressed }) => [styles.attribution, pressed && styles.pressed]}
             >
-              <Text style={styles.attributionText}>Nearby place data © OpenStreetMap contributors</Text>
+              <Text style={styles.attributionText}>
+                Map, nearby place and route data © OpenStreetMap contributors
+              </Text>
             </Pressable>
           </>
-        ) : location ? (
+        ) : (
           <View style={styles.loadHavens}>
             <Text style={styles.corridorEmpty}>
-              {havensError
-                ? havensError
-                : 'Loading nearby places sends this location to the OpenStreetMap Overpass service. SafeCity does not retain the response after you leave this screen.'}
+              {loading
+                ? 'Getting your current location and preparing the map...'
+                : 'Allow location access to open the live map and find nearby safe places.'}
             </Text>
             <ActionButton
-              label={havensLoaded ? 'Retry real nearby places' : 'Load real nearby places'}
-              loading={havensLoading}
-              variant="secondary"
-              onPress={() => void loadNearbyHavens()}
+              label="Allow location and open map"
+              loading={loading}
+              onPress={() => void refreshNearbyMap()}
             />
-            {havensLoaded ? (
-              <Pressable
-                accessibilityRole="link"
-                onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
-              >
-                <Text style={styles.attributionText}>Place data © OpenStreetMap contributors</Text>
-              </Pressable>
-            ) : null}
           </View>
-        ) : (
-          <Text style={styles.corridorEmpty}>Allow location to load nearby public places.</Text>
         )}
       </Card>
 
@@ -314,7 +592,7 @@ export default function SafetyNavigatorScreen() {
               key={category.id}
               accessibilityRole="radio"
               accessibilityState={{ checked: active }}
-              onPress={() => setSelected(category.id)}
+              onPress={() => selectCategory(category.id)}
               style={({ pressed }) => [styles.category, active && styles.categoryActive, pressed && styles.pressed]}
             >
               <Text style={styles.categoryIcon}>{category.icon}</Text>
@@ -327,10 +605,21 @@ export default function SafetyNavigatorScreen() {
 
       <Card
         title={`Find ${chosenCategory.title.toLowerCase()}`}
-        subtitle="Maps will show real nearby results. Choose a destination there and review the route before walking."
+        subtitle="Stay inside SafeCity to compare mapped safe havens, or continue in an external maps app for turn-by-turn directions."
       >
         <View style={styles.actions}>
-          <ActionButton label="Open nearby results in Maps" loading={loading} onPress={() => void openNearbySearch()} />
+          <ActionButton
+            label="Open nearest match in SafeCity"
+            disabled={!nearestHaven}
+            loading={havensLoading}
+            onPress={() => void openInAppMap(selected)}
+          />
+          <ActionButton
+            label="Search outside SafeCity"
+            loading={loading}
+            variant="secondary"
+            onPress={() => void openNearbySearch()}
+          />
           <ActionButton label="Share walk check-in" disabled={!location} variant="secondary" onPress={() => void shareWalkCheckIn()} />
           <ActionButton label="Call emergency 112" variant="danger" onPress={() => void Linking.openURL('tel:112')} />
         </View>
@@ -342,6 +631,66 @@ export default function SafetyNavigatorScreen() {
           SafeCity does not invent CCTV, crime, or “safe” zones. OpenStreetMap lighting and facility tags may be missing or outdated; missing data does not mean an area is unsafe. Maps routes may not follow mapped lighting. Stay in visible public areas and call 112 in immediate danger.
         </Text>
       </View>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setMapExpanded(false)}
+        presentationStyle="fullScreen"
+        visible={mapExpanded}
+      >
+        <SafeAreaView style={styles.mapModal}>
+          <View style={styles.mapModalHeader}>
+            <View>
+              <Text style={styles.mapModalEyebrow}>SAFE-WALK CORRIDOR</Text>
+              <Text style={styles.mapModalTitle}>In-app safety map</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setMapExpanded(false)}
+              style={({ pressed }) => [styles.mapCloseButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.mapCloseText}>Done</Text>
+            </Pressable>
+          </View>
+
+          {location ? (
+            <SafetyMap
+              center={{
+                latitude: location.latitude,
+                longitude: location.longitude,
+              }}
+              height={Math.max(360, windowHeight - 390)}
+              onSelectPin={(haven) => setSelectedHavenId(haven.id)}
+              pins={mappedHavens}
+              riskZones={riskSnapshot?.zones}
+              route={walkingRoute?.coordinates}
+              routeLoading={routeLoading}
+              selectedPinId={selectedHaven?.id}
+            />
+          ) : null}
+
+          {selectedHaven ? (
+            <View style={styles.mapModalDestination}>
+              <View style={styles.mapModalDestinationIcon}>
+                <Text style={styles.selectedHavenIcon}>{selectedHaven.icon}</Text>
+              </View>
+              <View style={styles.selectedHavenCopy}>
+                <Text style={styles.selectedHavenName}>{selectedHaven.name}</Text>
+                <Text style={styles.selectedHavenDetail}>
+                  {selectedHaven.corridorLabel} ·{' '}
+                  {formatDistance(selectedHaven.distanceMeters)} away
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          <ActionButton
+            label="Continue in Google Maps"
+            disabled={!selectedHaven}
+            onPress={() => openGoogleDirections(selectedHaven)}
+          />
+        </SafeAreaView>
+      </Modal>
     </Screen>
   );
 }
@@ -349,10 +698,88 @@ export default function SafetyNavigatorScreen() {
 const styles = StyleSheet.create({
   doneButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm },
   doneText: { color: colors.watch, fontWeight: '900' },
-  hero: { borderRadius: radii.lg, borderWidth: 1, borderColor: colors.safeDark, backgroundColor: colors.safeSoft, padding: spacing.lg, alignItems: 'center' },
-  heroIcon: { color: colors.safe, fontSize: 45, fontWeight: '900' },
-  heroTitle: { color: colors.text, fontSize: type.heading, fontWeight: '900', marginTop: spacing.sm },
-  heroBody: { color: colors.textMuted, fontSize: type.caption, lineHeight: 19, textAlign: 'center', marginTop: spacing.xs },
+  locationBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+  },
+  locationStatus: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  locationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.safe,
+  },
+  locationCopy: { flex: 1 },
+  locationLabel: {
+    color: colors.safe,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+  },
+  locationValue: {
+    color: colors.textMuted,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  refreshButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshText: { color: colors.text, fontSize: 24, fontWeight: '800', lineHeight: 26 },
+  inlineStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceRaised,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+  },
+  statusPulse: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: colors.alert,
+  },
+  inlineStatusText: { flex: 1, color: colors.textMuted, fontSize: type.caption },
+  mapError: {
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    backgroundColor: colors.dangerPanel,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+  },
+  mapErrorTitle: { color: colors.danger, fontSize: type.caption, fontWeight: '900' },
+  mapErrorText: { color: colors.textMuted, fontSize: 10, lineHeight: 15 },
+  filterEmpty: {
+    gap: spacing.xs,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceRaised,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+  },
+  filterEmptyTitle: { color: colors.text, fontSize: type.caption, fontWeight: '900' },
+  filterEmptyText: { color: colors.textMuted, fontSize: 10, lineHeight: 15 },
   corridorSummary: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -368,59 +795,111 @@ const styles = StyleSheet.create({
   contextMetric: { flex: 1, borderRadius: radii.md, backgroundColor: colors.surfaceRaised, padding: spacing.md },
   contextValue: { color: colors.safe, fontSize: type.heading, fontWeight: '900' },
   contextLabel: { color: colors.textMuted, fontSize: 10, lineHeight: 15, marginTop: 2 },
-  radar: {
-    height: 210,
-    borderRadius: radii.lg,
-    backgroundColor: colors.background,
+  mapPrivacy: {
+    borderRadius: radii.md,
+    backgroundColor: colors.watchSoft,
     borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
+    borderColor: colors.watchBorder,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
     marginBottom: spacing.md,
   },
-  radarHalo: {
-    position: 'absolute',
-    top: '10%',
-    left: '10%',
-    right: '10%',
-    bottom: '10%',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.safeSoft,
-  },
-  radarRing: {
-    position: 'absolute',
-    top: '24%',
-    left: '24%',
-    right: '24%',
-    bottom: '24%',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.safeSoft,
-  },
-  radarCenter: {
-    position: 'absolute',
-    left: '48%',
-    top: '48%',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.safe,
-    borderWidth: 3,
-    borderColor: colors.background,
-  },
-  radarPin: {
-    position: 'absolute',
-    width: 42,
-    height: 42,
-    marginLeft: -21,
-    marginTop: -21,
-    borderRadius: 21,
+  riskSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
+    backgroundColor: colors.surfaceRaised,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  riskLegend: {
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radarPinIcon: { fontSize: 20 },
+  riskLegendDot: {
+    position: 'absolute',
+    borderRadius: 999,
+  },
+  riskLegendEmerging: {
+    width: 32,
+    height: 32,
+    backgroundColor: 'rgba(255, 200, 87, 0.20)',
+  },
+  riskLegendElevated: {
+    width: 22,
+    height: 22,
+    backgroundColor: 'rgba(255, 143, 64, 0.34)',
+  },
+  riskLegendHigh: {
+    width: 10,
+    height: 10,
+    backgroundColor: 'rgba(255, 59, 92, 0.72)',
+  },
+  riskSummaryCopy: { flex: 1 },
+  riskSummaryTitle: { color: colors.text, fontSize: type.caption, fontWeight: '900' },
+  riskSummaryText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  mapPrivacyTitle: { color: colors.text, fontSize: type.caption, fontWeight: '900' },
+  mapPrivacyText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  selectedHaven: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.safe,
+    backgroundColor: colors.safeSoft,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  selectedHavenCopy: { flex: 1 },
+  selectedHavenLabel: {
+    color: colors.safe,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  selectedHavenName: {
+    color: colors.text,
+    fontSize: type.body,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  selectedHavenDetail: {
+    color: colors.textMuted,
+    fontSize: type.caption,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  routeError: {
+    color: colors.alert,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: spacing.xs,
+  },
+  selectedHavenIcon: { fontSize: 24 },
+  mapActions: { gap: spacing.sm, marginBottom: spacing.lg },
+  nearestTitle: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginBottom: spacing.sm,
+  },
   havenList: { gap: spacing.sm, marginBottom: spacing.md },
   havenRow: {
     flexDirection: 'row',
@@ -432,6 +911,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceRaised,
     padding: spacing.md,
   },
+  havenRowSelected: { borderColor: colors.safe, backgroundColor: colors.safeSoft },
+  havenRank: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.navigation,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  havenRankText: { color: colors.textMuted, fontSize: 10, fontWeight: '900' },
   havenIcon: {
     width: 44,
     height: 44,
@@ -445,7 +934,7 @@ const styles = StyleSheet.create({
   havenName: { color: colors.text, fontSize: type.body, fontWeight: '800' },
   havenDetail: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18, marginTop: 3 },
   havenHours: { color: colors.textSubtle, fontSize: 10, lineHeight: 15, marginTop: 2 },
-  havenScore: { color: colors.safe, fontSize: type.body, fontWeight: '900' },
+  routeChevron: { color: colors.safe, fontSize: 28, fontWeight: '700' },
   corridorEmpty: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18, marginTop: spacing.md },
   loadHavens: { gap: spacing.md },
   attribution: { alignSelf: 'center', padding: spacing.sm },
@@ -463,4 +952,59 @@ const styles = StyleSheet.create({
   notice: { borderRadius: radii.md, borderWidth: 1, borderColor: colors.dangerBorder, backgroundColor: colors.dangerPanel, padding: spacing.md, marginTop: spacing.md },
   noticeTitle: { color: colors.danger, fontSize: type.body, fontWeight: '900' },
   noticeBody: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18, marginTop: spacing.xs },
+  mapModal: {
+    flex: 1,
+    backgroundColor: colors.background,
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  mapModalHeader: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  mapModalEyebrow: {
+    color: colors.safe,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+  },
+  mapModalTitle: {
+    color: colors.text,
+    fontSize: type.title,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  mapCloseButton: {
+    minWidth: 64,
+    minHeight: 44,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  mapCloseText: { color: colors.text, fontSize: type.body, fontWeight: '900' },
+  mapModalDestination: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+  },
+  mapModalDestinationIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: colors.safeSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

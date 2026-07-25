@@ -1,30 +1,133 @@
-import { DynamicColorIOS, Platform, PlatformColor, type ColorValue } from 'react-native';
+import {
+  DynamicColorIOS,
+  Platform,
+  PlatformColor,
+  type ColorValue,
+} from 'react-native';
 
-function adaptiveColor(light: string, dark: string, androidAttribute: string): ColorValue {
+function adaptiveColor(
+  light: string,
+  dark: string,
+  androidResource: string,
+  androidThemeFallback: string,
+  androidFixedFallback: string,
+): ColorValue {
   if (Platform.OS === 'ios') return DynamicColorIOS({ light, dark });
-  if (Platform.OS === 'android') return PlatformColor(androidAttribute);
+  if (Platform.OS === 'android') {
+    return PlatformColor(
+      `@color/${androidResource}`,
+      androidThemeFallback,
+      androidFixedFallback,
+    );
+  }
   return dark;
 }
 
 export const colors = {
-  background: adaptiveColor('#F4F7FA', '#080B13', '?attr/colorBackground'),
-  surface: adaptiveColor('#FFFFFF', '#12151C', '?attr/colorBackgroundFloating'),
-  surfaceRaised: adaptiveColor('#E8EDF2', '#1B1E27', '?attr/colorButtonNormal'),
-  navigation: adaptiveColor('#FFFFFF', '#0D1420', '?attr/colorBackgroundFloating'),
-  border: adaptiveColor('#CFD6DE', '#2A2E38', '?attr/colorControlNormal'),
-  text: adaptiveColor('#111827', '#F7F8FA', '?attr/textColorPrimary'),
-  textMuted: adaptiveColor('#526071', '#969DAC', '?attr/textColorSecondary'),
-  textSubtle: adaptiveColor('#667085', '#667085', '?attr/textColorSecondary'),
+  background: adaptiveColor(
+    '#F4F7FA',
+    '#080B13',
+    'safecity_background',
+    '?attr/colorBackground',
+    '@android:color/black',
+  ),
+  surface: adaptiveColor(
+    '#FFFFFF',
+    '#12151C',
+    'safecity_surface',
+    '?attr/colorBackgroundFloating',
+    '@android:color/black',
+  ),
+  surfaceRaised: adaptiveColor(
+    '#E8EDF2',
+    '#1B1E27',
+    'safecity_surface_raised',
+    '?attr/colorButtonNormal',
+    '@android:color/black',
+  ),
+  navigation: adaptiveColor(
+    '#FFFFFF',
+    '#0D1420',
+    'safecity_navigation',
+    '?attr/colorBackgroundFloating',
+    '@android:color/black',
+  ),
+  border: adaptiveColor(
+    '#CFD6DE',
+    '#2A2E38',
+    'safecity_border',
+    '?attr/colorControlNormal',
+    '@android:color/darker_gray',
+  ),
+  text: adaptiveColor(
+    '#111827',
+    '#F7F8FA',
+    'safecity_text',
+    '?attr/colorForeground',
+    '@android:color/white',
+  ),
+  textMuted: adaptiveColor(
+    '#526071',
+    '#969DAC',
+    'safecity_text_muted',
+    '?attr/colorForeground',
+    '@android:color/darker_gray',
+  ),
+  textSubtle: adaptiveColor(
+    '#667085',
+    '#667085',
+    'safecity_text_subtle',
+    '?attr/colorForeground',
+    '@android:color/darker_gray',
+  ),
   safe: '#17C990',
   safeDark: '#117455',
-  safeSoft: adaptiveColor('#DDF7EE', '#123B34', '?attr/colorButtonNormal'),
+  safeSoft: adaptiveColor(
+    '#DDF7EE',
+    '#123B34',
+    'safecity_safe_soft',
+    '?attr/colorButtonNormal',
+    '@android:color/black',
+  ),
   watch: '#7DD3FC',
+  watchSoft: adaptiveColor(
+    '#E5F4FD',
+    '#10283A',
+    'safecity_watch_soft',
+    '?attr/colorButtonNormal',
+    '@android:color/black',
+  ),
+  watchBorder: adaptiveColor(
+    '#78BCE7',
+    '#32658A',
+    'safecity_watch_border',
+    '?attr/colorControlNormal',
+    '@android:color/darker_gray',
+  ),
   alert: '#FFB547',
-  alertSoft: adaptiveColor('#FFF1D6', '#3E2E16', '?attr/colorButtonNormal'),
+  alertSoft: adaptiveColor(
+    '#FFF1D6',
+    '#3E2E16',
+    'safecity_alert_soft',
+    '?attr/colorButtonNormal',
+    '@android:color/black',
+  ),
   danger: '#FF4A55',
-  dangerSoft: adaptiveColor('#FDE7EA', '#431C28', '?attr/colorButtonNormal'),
+  dangerSoft: adaptiveColor(
+    '#FDE7EA',
+    '#431C28',
+    'safecity_danger_soft',
+    '?attr/colorButtonNormal',
+    '@android:color/black',
+  ),
   dangerBorder: '#5D242A',
-  dangerPanel: adaptiveColor('#FFF7F8', '#160D13', '?attr/colorBackgroundFloating'),
+  dangerPanel: adaptiveColor(
+    '#FFF7F8',
+    '#160D13',
+    'safecity_danger_panel',
+    '?attr/colorBackgroundFloating',
+    '@android:color/black',
+  ),
   white: '#FFFFFF',
   black: '#000000',
 } as const;

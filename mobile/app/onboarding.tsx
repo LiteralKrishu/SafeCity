@@ -1,9 +1,10 @@
-import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AppState,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -26,13 +27,25 @@ import {
   TERMS_VERSION,
   legalConfigurationComplete,
 } from '@/legal/content';
-import { requestCorePermissions } from '@/services/permissions';
+import { useMonitoring } from '@/services/MonitoringProvider';
+import {
+  allCorePermissionsGranted,
+  getCorePermissionSnapshot,
+  requestCorePermissions,
+  type PermissionSnapshot,
+} from '@/services/permissions';
+import {
+  enablePersistentProtection,
+  enableVoiceTrigger,
+  openVoiceTriggerOverlaySettings,
+} from '@/services/persistent-voice-trigger';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { EmergencyContact } from '@/types/domain';
 
 export default function OnboardingScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const monitoring = useMonitoring();
   const { t } = useLocalization();
   const insets = useSafeAreaInsets();
   const consentItems = [t('onboarding.consentOne'), t('onboarding.consentTwo'), t('onboarding.consentThree')];
@@ -42,6 +55,8 @@ export default function OnboardingScreen() {
   const [consentVisible, setConsentVisible] = useState(false);
   const [permissionsRequested, setPermissionsRequested] = useState(false);
   const [permissionSummary, setPermissionSummary] = useState(() => t('onboarding.notReviewed'));
+  const [permissionSnapshot, setPermissionSnapshot] = useState<PermissionSnapshot | null>(null);
+  const [permissionError, setPermissionError] = useState('');
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -51,30 +66,136 @@ export default function OnboardingScreen() {
   const [finishBusy, setFinishBusy] = useState(false);
 
   const refreshContacts = async () => setContacts(await listContacts(db));
+
+  const updatePermissionState = (snapshot: PermissionSnapshot) => {
+    const granted = Object.values(snapshot).filter(Boolean).length;
+    setPermissionSnapshot(snapshot);
+    setPermissionSummary(
+      t('onboarding.permissionsCount', {
+        granted,
+        total: Object.keys(snapshot).length,
+      }),
+    );
+    setPermissionsRequested(true);
+  };
+
   useEffect(() => {
-    void refreshContacts();
-  }, []);
+    let active = true;
+    void Promise.all([
+      listContacts(db),
+      readSettings(db),
+      getCorePermissionSnapshot(),
+    ]).then(([storedContacts, settings, snapshot]) => {
+      if (!active) return;
+      setContacts(storedContacts);
+      updatePermissionState(snapshot);
+      const consentAlreadyRecorded =
+        settings.onboardingComplete &&
+        settings.adultConfirmed &&
+        settings.consentVersion === PROCESSING_CONSENT_VERSION &&
+        settings.privacyNoticeVersion === PRIVACY_NOTICE_VERSION &&
+        settings.termsVersion === TERMS_VERSION;
+      if (consentAlreadyRecorded) {
+        setConsents([true, true, true]);
+        setLegalAcceptances([true, true, true]);
+      }
+    }).catch(() => {
+      if (!active) return;
+      setPermissionSummary(t('onboarding.permissionsUnavailable'));
+      setPermissionsRequested(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [db, t]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' || !permissionsRequested) return;
+      void getCorePermissionSnapshot()
+        .then(updatePermissionState)
+        .catch(() => undefined);
+    });
+    return () => subscription.remove();
+  }, [permissionsRequested, t]);
 
   const consentComplete = consents.every(Boolean) && legalAcceptances.every(Boolean);
+  const permissionsComplete =
+    permissionSnapshot !== null && allCorePermissionsGranted(permissionSnapshot);
   const canFinish = useMemo(
-    () => consentComplete && contacts.length > 0,
-    [consentComplete, contacts.length],
+    () => permissionsComplete && consentComplete && contacts.length > 0,
+    [consentComplete, contacts.length, permissionsComplete],
   );
+
+  const permissionGuidance = [
+    {
+      key: 'camera' as const,
+      title: t('onboarding.permissionCamera'),
+      instruction: t('onboarding.permissionCameraChoice'),
+    },
+    {
+      key: 'microphone' as const,
+      title: t('onboarding.permissionMicrophone'),
+      instruction: t('onboarding.permissionMicrophoneChoice'),
+    },
+    {
+      key: 'motion' as const,
+      title: t('onboarding.permissionMotion'),
+      instruction: t('onboarding.permissionMotionChoice'),
+    },
+    {
+      key: 'locationForeground' as const,
+      title: t('onboarding.permissionLocation'),
+      instruction: t('onboarding.permissionLocationChoice'),
+    },
+    {
+      key: 'locationPrecise' as const,
+      title: t('onboarding.permissionPrecise'),
+      instruction: t('onboarding.permissionPreciseChoice'),
+    },
+    {
+      key: 'locationBackground' as const,
+      title: t('onboarding.permissionBackgroundLocation'),
+      instruction: t('onboarding.permissionBackgroundLocationChoice'),
+    },
+    {
+      key: 'notifications' as const,
+      title: t('onboarding.permissionNotifications'),
+      instruction: t('onboarding.permissionNotificationsChoice'),
+    },
+    {
+      key: 'fullScreenAlerts' as const,
+      title: t('onboarding.permissionFullScreen'),
+      instruction: t('onboarding.permissionFullScreenChoice'),
+    },
+  ];
+  const missingPermissions = permissionSnapshot
+    ? permissionGuidance.filter(({ key }) => !permissionSnapshot[key])
+    : permissionGuidance;
 
   const requestPermissions = async () => {
     setPermissionsBusy(true);
+    setPermissionError('');
     try {
       const result = await requestCorePermissions();
-      await Notifications.requestPermissionsAsync();
-      const granted = Object.values(result).filter(Boolean).length;
-      setPermissionSummary(t('onboarding.permissionsCount', { granted, total: Object.keys(result).length }));
-      setPermissionsRequested(true);
+      updatePermissionState(result);
     } catch {
       setPermissionSummary(t('onboarding.permissionsUnavailable'));
       setPermissionsRequested(true);
     } finally {
       setPermissionsBusy(false);
     }
+  };
+
+  const openPermissionSettings = async () => {
+    if (
+      missingPermissions.some(({ key }) => key === 'fullScreenAlerts') &&
+      missingPermissions.every(({ key }) => key === 'fullScreenAlerts')
+    ) {
+      await openVoiceTriggerOverlaySettings();
+      return;
+    }
+    await Linking.openSettings();
   };
 
   const openLegalDocument = (path: '/legal/privacy' | '/legal/terms') => {
@@ -111,12 +232,37 @@ export default function OnboardingScreen() {
 
   const finish = async () => {
     setFinishBusy(true);
+    setPermissionError('');
     try {
+      const verifiedPermissions = await getCorePermissionSnapshot();
+      updatePermissionState(verifiedPermissions);
+      if (!allCorePermissionsGranted(verifiedPermissions)) {
+        setPermissionError(t('onboarding.fixPermissionsFirst'));
+        return;
+      }
+      const voicePreparation = await enableVoiceTrigger(false);
+      if (!voicePreparation.ready) {
+        setPermissionError(voicePreparation.message);
+        return;
+      }
+      if (!voicePreparation.fullScreenAllowed) {
+        updatePermissionState({
+          ...verifiedPermissions,
+          fullScreenAlerts: false,
+        });
+        setPermissionError(t('onboarding.fixPermissionsFirst'));
+        return;
+      }
+      await enablePersistentProtection();
       const settings = await readSettings(db);
       const acceptedAt = new Date().toISOString();
       await writeSettings(db, {
         ...settings,
         onboardingComplete: true,
+        monitoringEnabled: true,
+        backgroundLocation: true,
+        voiceKeywordEnabled: true,
+        behaviorBaselineEnabled: true,
         consentVersion: PROCESSING_CONSENT_VERSION,
         consentGrantedAt: acceptedAt,
         privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
@@ -124,7 +270,14 @@ export default function OnboardingScreen() {
         termsAcceptedAt: acceptedAt,
         adultConfirmed: true,
       });
+      await monitoring.startMonitoring();
       router.replace('/(tabs)');
+    } catch (error) {
+      setPermissionError(
+        error instanceof Error
+          ? error.message
+          : t('onboarding.protectionSetupError'),
+      );
     } finally {
       setFinishBusy(false);
     }
@@ -139,7 +292,7 @@ export default function OnboardingScreen() {
             {t('onboarding.body')}
           </Text>
           <View style={styles.progressRow}>
-            <StepPill label={t('onboarding.sensors')} complete={permissionsRequested} />
+            <StepPill label={t('onboarding.sensors')} complete={permissionsComplete} />
             <StepPill label={t('onboarding.contact')} complete={contacts.length > 0} />
             <StepPill label={t('onboarding.consent')} complete={consentComplete} />
           </View>
@@ -156,14 +309,39 @@ export default function OnboardingScreen() {
           <View style={styles.cardAction}>
             <View style={styles.statusRow}>
               <Text style={styles.statusLabel}>{t('onboarding.currentStatus')}</Text>
-              <Text style={[styles.status, permissionsRequested && styles.statusReady]}>{permissionSummary}</Text>
+              <Text style={[styles.status, permissionsComplete && styles.statusReady]}>
+                {permissionSummary}
+              </Text>
             </View>
+            {permissionsRequested && missingPermissions.length > 0 ? (
+              <View accessibilityRole="alert" style={styles.permissionGuide}>
+                <Text style={styles.permissionGuideTitle}>
+                  {t('onboarding.permissionsMissingTitle')}
+                </Text>
+                {missingPermissions.map(({ key, title, instruction }) => (
+                  <View key={key} style={styles.permissionGuideRow}>
+                    <Text style={styles.permissionGuideMark}>!</Text>
+                    <View style={styles.permissionGuideCopy}>
+                      <Text style={styles.permissionGuideName}>{title}</Text>
+                      <Text style={styles.permissionGuideInstruction}>{instruction}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
             <ActionButton
               label={permissionsRequested ? t('onboarding.reviewPermissions') : t('onboarding.choosePermissions')}
               onPress={() => void requestPermissions()}
               variant="secondary"
               loading={permissionsBusy}
             />
+            {permissionsRequested && missingPermissions.length > 0 ? (
+              <ActionButton
+                label={t('onboarding.openPhoneSettings')}
+                onPress={() => void openPermissionSettings()}
+                variant="secondary"
+              />
+            ) : null}
           </View>
         </Card>
 
@@ -262,6 +440,9 @@ export default function OnboardingScreen() {
         </Card>
 
         <View style={styles.finish}>
+          {permissionError ? (
+            <Text accessibilityRole="alert" style={styles.errorText}>{permissionError}</Text>
+          ) : null}
           <ActionButton
             label={t('onboarding.finish')}
             onPress={() => void finish()}
@@ -269,7 +450,11 @@ export default function OnboardingScreen() {
             loading={finishBusy}
           />
           {!canFinish ? (
-            <Text style={styles.hint}>{t('onboarding.finishHint')}</Text>
+            <Text style={styles.hint}>
+              {permissionsComplete
+                ? t('onboarding.finishHint')
+                : t('onboarding.finishPermissionsHint')}
+            </Text>
           ) : (
             <Text style={styles.readyHint}>{t('onboarding.ready')}</Text>
           )}
@@ -439,6 +624,42 @@ const styles = StyleSheet.create({
   statusLabel: { color: colors.textMuted, fontSize: type.caption, fontWeight: '700' },
   status: { color: colors.text, fontSize: type.body, fontWeight: '700' },
   statusReady: { color: colors.safe },
+  permissionGuide: {
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radii.md,
+    backgroundColor: colors.dangerSoft,
+    padding: spacing.md,
+  },
+  permissionGuideTitle: {
+    color: colors.danger,
+    fontSize: type.body,
+    fontWeight: '900',
+  },
+  permissionGuideRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  permissionGuideMark: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    overflow: 'hidden',
+    textAlign: 'center',
+    color: colors.white,
+    backgroundColor: colors.danger,
+    fontWeight: '900',
+  },
+  permissionGuideCopy: { flex: 1 },
+  permissionGuideName: { color: colors.text, fontSize: type.caption, fontWeight: '800' },
+  permissionGuideInstruction: {
+    color: colors.textMuted,
+    fontSize: type.caption,
+    lineHeight: 18,
+    marginTop: 2,
+  },
   form: { gap: spacing.md, marginTop: spacing.lg },
   inputLabel: { color: colors.text, fontSize: type.caption, fontWeight: '700', marginBottom: spacing.xs },
   input: {

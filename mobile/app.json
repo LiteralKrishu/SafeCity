@@ -38,10 +38,14 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
         "FOREGROUND_SERVICE_MICROPHONE",
-        "POST_NOTIFICATIONS"
+        "FOREGROUND_SERVICE_SPECIAL_USE",
+        "RECEIVE_BOOT_COMPLETED",
+        "POST_NOTIFICATIONS",
+        "USE_FULL_SCREEN_INTENT"
       ]
     },
     "plugins": [
+      "./plugins/with-safecity-theme-colors",
       "expo-router",
       [
         "expo-camera",

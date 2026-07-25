@@ -7,6 +7,7 @@ import {
   readSettings,
 } from '@/db/repository';
 import { deleteEvidenceFiles } from '@/services/evidence';
+import { flushAnonymousRiskQueue } from '@/services/riskZones';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -32,7 +33,15 @@ export function StartupMaintenance() {
           ]);
           await deleteIncidentRecord(db, incident.id);
         }
+        await db.runAsync(
+          'DELETE FROM anonymous_risk_queue WHERE queued_at < ?',
+          new Date(Date.now() - 30 * DAY_MS).toISOString(),
+        );
       });
+
+      if (settings.anonymousRiskSharingEnabled) {
+        await flushAnonymousRiskQueue(db);
+      }
     };
 
     void purgeExpiredLocalData().catch(() => {

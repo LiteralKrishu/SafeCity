@@ -59,6 +59,11 @@ export function LanguagePicker({ visible, onClose }: { visible: boolean; onClose
   );
 
   const choose = async (next: LanguagePreference) => {
+    if (next === preference) {
+      setQuery('');
+      onClose();
+      return;
+    }
     const displayName =
       next === 'system' ? t('language.system') : getLanguageDisplayName(next, next);
     setChoosing(next);

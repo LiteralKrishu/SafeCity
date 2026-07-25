@@ -8,7 +8,9 @@
     "android": "eas build --platform android --profile preview",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
-    "check": "tsc --noEmit && expo-doctor"
+    "check": "npm run check:threat-language && npm run check:behavior-baseline && tsc --noEmit && expo-doctor",
+    "check:behavior-baseline": "node scripts/validate-behavior-baseline.cjs",
+    "check:threat-language": "node scripts/validate-threat-language.cjs"
   },
   "dependencies": {
     "@siteed/sherpa-onnx.rn": "^1.3.1",

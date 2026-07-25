@@ -16,6 +16,10 @@ import {
   prepareTranslationPack,
   type TranslationPack,
 } from '@/i18n/machine-translation';
+import {
+  readStoredLanguagePreference,
+  writeStoredLanguagePreference,
+} from '@/i18n/language-storage';
 import { englishTranslations, translations, type TranslationKey } from '@/i18n/translations';
 import {
   detectDeviceLanguage,
@@ -81,11 +85,26 @@ export function LocalizationProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     let active = true;
-    void readSettings(db).then((settings) => {
+    void Promise.all([
+      readStoredLanguagePreference().catch(() => null),
+      readSettings(db).catch(() => null),
+    ]).then(([storedPreference, settings]) => {
       if (!active) return;
-      const savedPreference = normalizeLanguagePreference(settings.language);
+      const savedPreference = normalizeLanguagePreference(
+        storedPreference ?? settings?.language,
+      );
       setPreference(savedPreference);
-      const savedLanguage = savedPreference === 'system' ? detectDeviceLanguage() : savedPreference;
+      const savedLanguage =
+        savedPreference === 'system' ? detectDeviceLanguage() : savedPreference;
+      if (!storedPreference) {
+        void writeStoredLanguagePreference(savedPreference).catch(() => undefined);
+      }
+      if (settings && settings.language !== savedPreference) {
+        void writeSettings(db, {
+          ...settings,
+          language: savedPreference,
+        }).catch(() => undefined);
+      }
       if (!isBundledLanguage(savedLanguage)) {
         void ensureLanguage(savedLanguage).catch(() => undefined);
       }
@@ -116,8 +135,12 @@ export function LocalizationProvider({ children }: PropsWithChildren) {
       await ensureLanguage(nextLanguage);
       if (nextPreference === 'system') setDeviceLanguage(nextLanguage);
       setPreference(nextPreference);
-      const settings = await readSettings(db);
-      await writeSettings(db, { ...settings, language: nextPreference });
+      await writeStoredLanguagePreference(nextPreference).catch(() => undefined);
+      void readSettings(db)
+        .then((settings) =>
+          writeSettings(db, { ...settings, language: nextPreference }),
+        )
+        .catch(() => undefined);
     },
     [db, ensureLanguage],
   );

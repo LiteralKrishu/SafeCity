@@ -27,11 +27,19 @@ import {
 import { useLocalization } from '@/i18n/localization-provider';
 import type { TranslationKey } from '@/i18n/translations';
 import { getLanguageDisplayName } from '@/i18n/types';
-import { requestCorePermissions } from '@/services/permissions';
 import { resetDeviceId } from '@/services/deviceIdentity';
 import { eraseEvidenceVault } from '@/services/evidence';
 import { useMonitoring } from '@/services/MonitoringProvider';
-import { prepareVoiceTrigger } from '@/services/voice-trigger';
+import {
+  enableVoiceTrigger,
+  getPersistentVoiceTriggerState,
+  isPersistentVoiceTriggerAvailable,
+  openVoiceTriggerOverlaySettings,
+} from '@/services/persistent-voice-trigger';
+import {
+  isRiskServiceConfigured,
+  resetAnonymousRiskIdentity,
+} from '@/services/riskZones';
 import { useMonitorStore } from '@/store/monitorStore';
 import {
   PRIVACY_NOTICE_VERSION,
@@ -63,13 +71,27 @@ export default function SettingsScreen() {
   const [erasing, setErasing] = useState(false);
   const [languagePickerVisible, setLanguagePickerVisible] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
+  const [monitoringBusy, setMonitoringBusy] = useState(false);
+  const [baselineBusy, setBaselineBusy] = useState(false);
+  const sessionState = useMonitorStore((state) => state.sessionState);
+  const behaviorBaseline = useMonitorStore(
+    (state) => state.telemetry.behaviorBaseline,
+  );
   const voiceTriggerStatus = useMonitorStore(
     (state) => state.telemetry.voiceTriggerStatus,
   );
 
   const refresh = useCallback(async () => {
     const [storedSettings, storedContacts] = await Promise.all([readSettings(db), listContacts(db)]);
-    setSettings(storedSettings);
+    let synchronizedSettings = storedSettings;
+    if (storedSettings.voiceKeywordEnabled && isPersistentVoiceTriggerAvailable()) {
+      const persistentState = await getPersistentVoiceTriggerState();
+      if (persistentState.configured && !persistentState.enabled) {
+        synchronizedSettings = { ...storedSettings, voiceKeywordEnabled: false };
+        await writeSettings(db, synchronizedSettings);
+      }
+    }
+    setSettings(synchronizedSettings);
     setContacts(storedContacts);
   }, [db]);
 
@@ -81,8 +103,8 @@ export default function SettingsScreen() {
 
   const save = async (next: AppSettings) => {
     const synchronized = { ...next, language: preference };
-    setSettings(synchronized);
     await writeSettings(db, synchronized);
+    setSettings(synchronized);
   };
 
   const addNewContact = async () => {
@@ -98,23 +120,193 @@ export default function SettingsScreen() {
 
   const updateVoiceTrigger = async (enabled: boolean) => {
     setVoiceBusy(true);
+    const previousSettings = settings;
     try {
       if (enabled) {
-        const preparation = await prepareVoiceTrigger();
+        useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'checking' });
+        const preparation = await enableVoiceTrigger(
+          useMonitorStore.getState().sessionState !== 'monitoring',
+        );
         if (!preparation.ready) {
-          await save({ ...settings, voiceKeywordEnabled: false });
           await monitoring.setVoiceTriggerEnabled(false);
+          setSettings(previousSettings);
           Alert.alert(t('settings.voiceSetupTitle'), preparation.message);
           return;
         }
+        const nextSettings = { ...settings, voiceKeywordEnabled: true };
+        await writeSettings(db, { ...nextSettings, language: preference });
+        setSettings({ ...nextSettings, language: preference });
+        await monitoring.setVoiceTriggerEnabled(true);
+        if (!preparation.fullScreenAllowed) {
+          Alert.alert(
+            'Allow the SOS countdown overlay',
+            'Voice SOS is on. Allow full-screen alerts so the 10-second countdown can open immediately over the lock screen. Without it, Android may show a prominent notification instead.',
+            [
+              { text: 'Later', style: 'cancel' },
+              {
+                text: 'Open settings',
+                onPress: () => void openVoiceTriggerOverlaySettings(),
+              },
+            ],
+          );
+        }
+        return;
       }
-      await save({ ...settings, voiceKeywordEnabled: enabled });
-      await monitoring.setVoiceTriggerEnabled(enabled);
-    } catch {
-      Alert.alert(t('settings.voiceSetupTitle'), t('settings.voiceSetupError'));
+      await monitoring.setVoiceTriggerEnabled(false);
+      const nextSettings = { ...settings, voiceKeywordEnabled: false };
+      try {
+        await writeSettings(db, { ...nextSettings, language: preference });
+      } finally {
+        setSettings({ ...nextSettings, language: preference });
+      }
+    } catch (error) {
+      if (enabled) {
+        await monitoring.setVoiceTriggerEnabled(false).catch(() => undefined);
+        await writeSettings(db, previousSettings).catch(() => undefined);
+        setSettings(previousSettings);
+      }
+      Alert.alert(
+        t('settings.voiceSetupTitle'),
+        error instanceof Error ? error.message : t('settings.voiceSetupError'),
+      );
     } finally {
       setVoiceBusy(false);
     }
+  };
+
+  const updateMonitoring = async (enabled: boolean) => {
+    setMonitoringBusy(true);
+    const previousSettings = settings;
+    try {
+      if (enabled) {
+        if (sessionState === 'paused') {
+          await monitoring.resumeMonitoring();
+        } else if (sessionState === 'idle') {
+          await monitoring.startMonitoring();
+        }
+      } else {
+        await monitoring.stopMonitoring();
+      }
+      const nextSettings = { ...settings, monitoringEnabled: enabled };
+      await writeSettings(db, { ...nextSettings, language: preference });
+      setSettings({ ...nextSettings, language: preference });
+    } catch (error) {
+      await writeSettings(db, previousSettings).catch(() => undefined);
+      setSettings(previousSettings);
+      Alert.alert(
+        t('settings.monitoringErrorTitle'),
+        error instanceof Error ? error.message : t('home.tryAgain'),
+      );
+    } finally {
+      setMonitoringBusy(false);
+    }
+  };
+
+  const applyBehaviorBaseline = async (enabled: boolean) => {
+    setBaselineBusy(true);
+    const previousSettings = settings;
+    const nextSettings = { ...settings, behaviorBaselineEnabled: enabled };
+    try {
+      await writeSettings(db, { ...nextSettings, language: preference });
+      setSettings({ ...nextSettings, language: preference });
+      await monitoring.setBehaviorBaselineEnabled(enabled);
+    } catch {
+      await writeSettings(db, previousSettings).catch(() => undefined);
+      setSettings(previousSettings);
+      await monitoring
+        .setBehaviorBaselineEnabled(previousSettings.behaviorBaselineEnabled)
+        .catch(() => undefined);
+      Alert.alert('Could not update deviation detection', t('home.tryAgain'));
+    } finally {
+      setBaselineBusy(false);
+    }
+  };
+
+  const updateBehaviorBaseline = (enabled: boolean) => {
+    if (enabled) {
+      void applyBehaviorBaseline(true);
+      return;
+    }
+    Alert.alert(
+      t('settings.baselineTurnOffTitle'),
+      t('settings.baselineTurnOffBody'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('settings.baselineOff'),
+          style: 'destructive',
+          onPress: () => void applyBehaviorBaseline(false),
+        },
+      ],
+    );
+  };
+
+  const clearBehaviorBaseline = () => {
+    Alert.alert(
+      t('settings.baselineClearTitle'),
+      t('settings.baselineClearBody'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('settings.baselineClear'),
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setBaselineBusy(true);
+              try {
+                await monitoring.setBehaviorBaselineEnabled(false);
+                await monitoring.setBehaviorBaselineEnabled(true);
+              } catch {
+                Alert.alert(
+                  'Could not clear the learned baseline',
+                  t('home.tryAgain'),
+                );
+              } finally {
+                setBaselineBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  const updateAnonymousRiskSharing = (enabled: boolean) => {
+    if (!enabled) {
+      void (async () => {
+        await db.runAsync('DELETE FROM anonymous_risk_queue');
+        await resetAnonymousRiskIdentity();
+        await save({
+          ...settings,
+          anonymousRiskSharingEnabled: false,
+          anonymousRiskConsentGrantedAt: null,
+        });
+      })();
+      return;
+    }
+    if (!isRiskServiceConfigured()) {
+      Alert.alert(
+        'Risk service is not connected',
+        'Add the SafeCity risk API address to the production app configuration before enabling anonymous community reporting.',
+      );
+      return;
+    }
+    Alert.alert(
+      'Share anonymous risk signals?',
+      'After an SOS, SafeCity may send an approximately 500-metre area, an hourly time bucket, and the trigger type. It never sends your exact location, evidence, contacts, or a stable device ID. You can turn this off and clear queued reports at any time.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Allow anonymous sharing',
+          onPress: () =>
+            void save({
+              ...settings,
+              anonymousRiskSharingEnabled: true,
+              anonymousRiskConsentGrantedAt: new Date().toISOString(),
+            }),
+        },
+      ],
+    );
   };
 
   const withdrawConsentAndErase = () => {
@@ -130,10 +322,12 @@ export default function SettingsScreen() {
             void (async () => {
               setErasing(true);
               try {
+                await monitoring.setVoiceTriggerEnabled(false);
                 await monitoring.stopMonitoring();
                 await eraseEvidenceVault();
                 await eraseAllLocalData(db);
                 await resetDeviceId();
+                await resetAnonymousRiskIdentity();
                 router.replace('/onboarding');
                 Alert.alert(
                   t('settings.withdrawnTitle'),
@@ -202,6 +396,19 @@ export default function SettingsScreen() {
 
       <Text style={styles.sectionLabel}>{t('settings.inferenceSection')}</Text>
       <Card
+        title={t('settings.monitoringTitle')}
+        subtitle={t('settings.monitoringDetail')}
+      >
+        <SettingRow
+          title={t('settings.monitoringSwitchTitle')}
+          description={t('settings.monitoringSwitchDetail')}
+          value={settings.monitoringEnabled}
+          disabled={monitoringBusy}
+          onChange={(monitoringEnabled) => void updateMonitoring(monitoringEnabled)}
+        />
+      </Card>
+
+      <Card
         title={t('settings.aiTitle')}
         subtitle={t('settings.aiDetail')}
       >
@@ -219,6 +426,66 @@ export default function SettingsScreen() {
             <Text style={styles.localAiText}>{t('settings.aiAdaptive')}</Text>
           </View>
         </View>
+      </Card>
+
+      <Card
+        title={t('settings.baselineTitle')}
+        subtitle={t('settings.baselineDetail')}
+      >
+        <SettingRow
+          title={t('settings.baselineSwitchTitle')}
+          description={t('settings.baselineSwitchDetail')}
+          value={settings.behaviorBaselineEnabled}
+          disabled={baselineBusy}
+          onChange={updateBehaviorBaseline}
+        />
+        <View style={styles.baselineMetrics}>
+          <View style={styles.baselineMetric}>
+            <Text style={styles.baselineMetricLabel}>
+              {t('settings.baselineStatus')}
+            </Text>
+            <Text style={styles.baselineMetricValue}>
+              {behaviorBaseline.phase === 'ready'
+                ? t('settings.baselineReady')
+                : behaviorBaseline.phase === 'limited'
+                  ? t('settings.baselineLimited')
+                  : behaviorBaseline.phase === 'warming'
+                    ? t('settings.baselineWarming', {
+                        progress: Math.round(behaviorBaseline.progress * 100),
+                      })
+                    : t('settings.baselineOff')}
+            </Text>
+          </View>
+          <View style={styles.baselineMetric}>
+            <Text style={styles.baselineMetricLabel}>
+              {t('settings.baselineSamples')}
+            </Text>
+            <Text style={styles.baselineMetricValue}>
+              {behaviorBaseline.sampleCount} · {behaviorBaseline.dayCount}/3 days
+            </Text>
+          </View>
+          <View style={styles.baselineMetric}>
+            <Text style={styles.baselineMetricLabel}>
+              {t('settings.baselineDeviation')}
+            </Text>
+            <Text style={styles.baselineMetricValue}>
+              {behaviorBaseline.ready
+                ? `${Math.round(behaviorBaseline.deviationScore * 100)}%`
+                : '—'}
+            </Text>
+          </View>
+        </View>
+        {settings.behaviorBaselineEnabled &&
+        behaviorBaseline.sampleCount > 0 ? (
+          <View style={styles.baselineAction}>
+            <ActionButton
+              label={t('settings.baselineClear')}
+              loading={baselineBusy}
+              variant="secondary"
+              onPress={clearBehaviorBaseline}
+            />
+          </View>
+        ) : null}
       </Card>
 
       <Card
@@ -297,6 +564,12 @@ export default function SettingsScreen() {
           value={settings.backgroundLocation}
           onChange={(backgroundLocation) => void save({ ...settings, backgroundLocation })}
         />
+        <SettingRow
+          title="Anonymous community risk zones"
+          description="Optionally contribute a coarse area after SOS. Exact GPS, evidence, contacts, and stable identifiers never leave this phone."
+          value={settings.anonymousRiskSharingEnabled}
+          onChange={updateAnonymousRiskSharing}
+        />
         <View style={styles.retentionRow}>
           <View style={styles.settingCopy}>
             <Text style={styles.settingTitle}>{t('settings.retentionTitle')}</Text>
@@ -325,7 +598,7 @@ export default function SettingsScreen() {
           <ActionButton
             label={t('settings.reviewPermissions')}
             variant="secondary"
-            onPress={() => void requestCorePermissions().then(() => Alert.alert(t('settings.permissionsUpdated')))}
+            onPress={() => router.push('/onboarding')}
           />
         </View>
       </Card>
@@ -457,6 +730,25 @@ const styles = StyleSheet.create({
   localAiRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   localAiMark: { color: colors.safe, fontWeight: '900' },
   localAiText: { flex: 1, color: colors.textMuted, fontSize: type.caption, lineHeight: 18 },
+  baselineMetrics: { marginTop: spacing.sm },
+  baselineMetric: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  baselineMetricLabel: { color: colors.textMuted, fontSize: type.caption, flex: 1 },
+  baselineMetricValue: {
+    color: colors.text,
+    fontSize: type.caption,
+    fontWeight: '800',
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  baselineAction: { marginTop: spacing.md },
   voiceStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',

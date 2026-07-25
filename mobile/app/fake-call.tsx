@@ -1,7 +1,12 @@
 import * as Haptics from 'expo-haptics';
-import * as Speech from 'expo-speech';
+import {
+  createAudioPlayer,
+  setAudioModeAsync,
+  type AudioPlayer,
+  type AudioStatus,
+} from 'expo-audio';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, Vibration, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -21,6 +26,7 @@ const callers: Array<{
   emoji: string;
   speechLanguage: string;
   speechLines: string[];
+  audioLines: number[];
 }> = [
   {
     id: 'family',
@@ -33,6 +39,12 @@ const callers: Array<{
       'I am almost there. Stay on the phone with me.',
       'I am right at the metro exit and coming down your street now.',
       'Keep walking toward the main road. I will meet you there.',
+    ],
+    audioLines: [
+      require('../assets/audio/fake-call/family-1.m4a'),
+      require('../assets/audio/fake-call/family-2.m4a'),
+      require('../assets/audio/fake-call/family-3.m4a'),
+      require('../assets/audio/fake-call/family-4.m4a'),
     ],
   },
   {
@@ -47,6 +59,12 @@ const callers: Array<{
       'Security is with me and we are walking toward you.',
       'Stay near the entrance. I can see the location you sent.',
     ],
+    audioLines: [
+      require('../assets/audio/fake-call/office-1.m4a'),
+      require('../assets/audio/fake-call/office-2.m4a'),
+      require('../assets/audio/fake-call/office-3.m4a'),
+      require('../assets/audio/fake-call/office-4.m4a'),
+    ],
   },
   {
     id: 'driver',
@@ -60,10 +78,148 @@ const callers: Array<{
       'I have reached the well-lit main gate. I am waiting outside.',
       'Do not take the side lane. Meet me beside the security desk.',
     ],
+    audioLines: [
+      require('../assets/audio/fake-call/driver-1.m4a'),
+      require('../assets/audio/fake-call/driver-2.m4a'),
+      require('../assets/audio/fake-call/driver-3.m4a'),
+      require('../assets/audio/fake-call/driver-4.m4a'),
+    ],
   },
 ];
 
 const delays = [0, 5, 15, 30] as const;
+const AUDIO_LOAD_TIMEOUT_MS = 5_000;
+const AUDIO_PLAY_TIMEOUT_MS = 2_000;
+let bundledAudioPlayer: AudioPlayer | null = null;
+let playbackOperationId = 0;
+let cancelStatusWait: (() => void) | null = null;
+
+class FakeCallPlaybackCancelledError extends Error {
+  constructor() {
+    super('Fake-call playback was cancelled.');
+    this.name = 'FakeCallPlaybackCancelledError';
+  }
+}
+
+function releasePlayer(audioPlayer: AudioPlayer | null): void {
+  if (!audioPlayer) return;
+  try {
+    audioPlayer.pause();
+  } catch {
+    // The native player may already have been released.
+  }
+  try {
+    audioPlayer.remove();
+  } catch {
+    // The native player may already have been released.
+  }
+  if (bundledAudioPlayer === audioPlayer) bundledAudioPlayer = null;
+}
+
+function stopFakeCallAudio(): void {
+  playbackOperationId += 1;
+  cancelStatusWait?.();
+  cancelStatusWait = null;
+  releasePlayer(bundledAudioPlayer);
+}
+
+function waitForPlayerStatus(
+  audioPlayer: AudioPlayer,
+  operationId: number,
+  predicate: (status: AudioStatus) => boolean,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let subscription: ReturnType<AudioPlayer['addListener']> | undefined;
+
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
+      subscription?.remove();
+      if (cancelStatusWait === cancel) cancelStatusWait = null;
+    };
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const check = (status: AudioStatus) => {
+      if (
+        operationId !== playbackOperationId ||
+        bundledAudioPlayer !== audioPlayer
+      ) {
+        finish(new FakeCallPlaybackCancelledError());
+      } else if (status.error) {
+        finish(new Error(status.error));
+      } else if (predicate(status)) {
+        finish();
+      }
+    };
+    const cancel = () => finish(new FakeCallPlaybackCancelledError());
+
+    cancelStatusWait = cancel;
+    subscription = audioPlayer.addListener('playbackStatusUpdate', check);
+    check(audioPlayer.currentStatus);
+    if (settled) return;
+    timeout = setTimeout(() => {
+      check(audioPlayer.currentStatus);
+      if (!settled) finish(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+}
+
+async function playFakeCallAudio(source: number): Promise<void> {
+  stopFakeCallAudio();
+  const operationId = playbackOperationId;
+
+  await setAudioModeAsync({
+    playsInSilentMode: true,
+    interruptionMode: 'doNotMix',
+    allowsRecording: false,
+    allowsBackgroundRecording: false,
+    shouldPlayInBackground: false,
+    shouldRouteThroughEarpiece: false,
+  });
+  if (operationId !== playbackOperationId) {
+    throw new FakeCallPlaybackCancelledError();
+  }
+
+  const audioPlayer = createAudioPlayer(source, {
+    downloadFirst: true,
+    updateInterval: 100,
+  });
+  bundledAudioPlayer = audioPlayer;
+  audioPlayer.volume = 1;
+
+  try {
+    await waitForPlayerStatus(
+      audioPlayer,
+      operationId,
+      (status) => status.isLoaded,
+      AUDIO_LOAD_TIMEOUT_MS,
+      'The caller voice took too long to load.',
+    );
+    audioPlayer.play();
+    await waitForPlayerStatus(
+      audioPlayer,
+      operationId,
+      (status) => status.playing,
+      AUDIO_PLAY_TIMEOUT_MS,
+      'The phone did not start caller voice playback.',
+    );
+  } catch (error) {
+    releasePlayer(audioPlayer);
+    throw error;
+  }
+}
+
+function isPlaybackCancelled(error: unknown): boolean {
+  return error instanceof FakeCallPlaybackCancelledError;
+}
 
 function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
@@ -80,11 +236,22 @@ export default function FakeCallScreen() {
   const [remaining, setRemaining] = useState(5);
   const [connectedSeconds, setConnectedSeconds] = useState(0);
   const [spokenLineIndex, setSpokenLineIndex] = useState(2);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
 
   const caller = useMemo(
     () => callers.find((option) => option.id === callerId) ?? callers[0]!,
     [callerId],
   );
+
+  const playCallerVoice = useCallback((source: number) => {
+    setVoiceError(null);
+    void playFakeCallAudio(source).catch((error) => {
+      if (isPlaybackCancelled(error)) return;
+      setVoiceError(
+        'Caller voice could not play. Raise the media volume, check the audio output, then tap Play next line.',
+      );
+    });
+  }, []);
 
   useEffect(() => {
     if (phase !== 'waiting') return;
@@ -109,20 +276,12 @@ export default function FakeCallScreen() {
     if (phase !== 'connected') return;
     let firstVoiceTimeout: ReturnType<typeof setTimeout> | null = null;
     let secondVoiceTimeout: ReturnType<typeof setTimeout> | null = null;
-    Speech.stop();
+    stopFakeCallAudio();
     firstVoiceTimeout = setTimeout(() => {
-      Speech.speak(caller.speechLines[0] ?? 'I am almost there.', {
-        language: caller.speechLanguage,
-        rate: 0.98,
-        pitch: 1,
-      });
+      playCallerVoice(caller.audioLines[0]!);
     }, 250);
     secondVoiceTimeout = setTimeout(() => {
-      Speech.speak(caller.speechLines[1] ?? caller.speechLines[0] ?? 'I am still on my way.', {
-        language: caller.speechLanguage,
-        rate: 0.98,
-        pitch: 1,
-      });
+      playCallerVoice(caller.audioLines[1] ?? caller.audioLines[0]!);
       setSpokenLineIndex(2);
     }, 9_500);
     const interval = setInterval(() => setConnectedSeconds((value) => value + 1), 1_000);
@@ -130,27 +289,23 @@ export default function FakeCallScreen() {
       if (firstVoiceTimeout) clearTimeout(firstVoiceTimeout);
       if (secondVoiceTimeout) clearTimeout(secondVoiceTimeout);
       clearInterval(interval);
-      Speech.stop();
+      stopFakeCallAudio();
     };
-  }, [caller.speechLanguage, caller.speechLines, phase]);
+  }, [caller.audioLines, phase, playCallerVoice]);
 
   const start = () => {
     setRemaining(delay);
     setConnectedSeconds(0);
     setSpokenLineIndex(2);
-    Speech.stop();
+    setVoiceError(null);
+    stopFakeCallAudio();
     setPhase(delay === 0 ? 'ringing' : 'waiting');
   };
 
   const speakNextLine = () => {
-    const line = caller.speechLines[spokenLineIndex % caller.speechLines.length];
-    if (!line) return;
-    Speech.stop();
-    Speech.speak(line, {
-      language: caller.speechLanguage,
-      rate: 0.98,
-      pitch: 1,
-    });
+    const source = caller.audioLines[spokenLineIndex % caller.audioLines.length];
+    if (!source) return;
+    playCallerVoice(source);
     setSpokenLineIndex((index) => index + 1);
   };
 
@@ -223,7 +378,12 @@ export default function FakeCallScreen() {
               ? t('fakeCall.incoming')
               : `${t('fakeCall.connected')} · ${formatDuration(connectedSeconds)}`}
         </Text>
-        {phase === 'connected' ? <Text style={styles.prompt}>{t(caller.promptKey)}</Text> : null}
+        {phase === 'connected' ? (
+          <>
+            <Text style={styles.prompt}>{t(caller.promptKey)}</Text>
+            {voiceError ? <Text style={styles.voiceError}>{voiceError}</Text> : null}
+          </>
+        ) : null}
       </View>
 
       {phase === 'ringing' ? (
@@ -283,6 +443,7 @@ const styles = StyleSheet.create({
   callerName: { color: colors.white, fontSize: 34, fontWeight: '700', marginTop: spacing.lg },
   callState: { color: '#BAC5D1', fontSize: type.body, marginTop: spacing.sm, fontVariant: ['tabular-nums'] },
   prompt: { color: colors.textMuted, fontSize: type.body, lineHeight: 23, textAlign: 'center', maxWidth: 320, marginTop: spacing.xl },
+  voiceError: { color: '#FFB4B9', fontSize: type.caption, lineHeight: 18, textAlign: 'center', maxWidth: 330, marginTop: spacing.md },
   callActions: { flexDirection: 'row', justifyContent: 'space-around', paddingBottom: spacing.xl },
   callAction: { width: 86, minHeight: 86, borderRadius: 43, alignItems: 'center', justifyContent: 'center' },
   decline: { backgroundColor: '#E64850' },

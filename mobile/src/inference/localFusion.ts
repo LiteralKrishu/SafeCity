@@ -1,10 +1,27 @@
 import {
   inferOnDeviceAudio,
-  ON_DEVICE_MODEL_VERSION,
   unavailableAudioInference,
   type LocalAudioInference,
 } from '@/inference/onDeviceAudio';
-import type { Assessment, MotionFeatures, RetrievedPattern, RiskLevel } from '@/types/domain';
+import {
+  BEHAVIOR_BASELINE_VERSION,
+  type BehaviorDeviationSignal,
+} from '@/inference/behaviorBaseline';
+import { scoreCalibratedMotion } from '@/inference/safetyCalibration';
+import {
+  scoreThreatLanguageSignal,
+  THREAT_DUPLICATE_COOLDOWN_MS,
+  THREAT_MATCH_WINDOW_MS,
+  type ThreatPhraseKeyword,
+  type ThreatPhraseMatch,
+} from '@/inference/threatLanguage';
+import type {
+  Assessment,
+  InferenceModelPreference,
+  MotionFeatures,
+  RetrievedPattern,
+  RiskLevel,
+} from '@/types/domain';
 
 type PatternPolarity = 'risk' | 'suppress';
 
@@ -22,6 +39,7 @@ interface WindowEvidence {
 
 interface SessionMemory {
   windows: WindowEvidence[];
+  threatMatches: ThreatPhraseMatch[];
   lastLevel: RiskLevel;
   lastSeen: number;
   incidentOpenUntil: number;
@@ -78,6 +96,24 @@ const PATTERNS = {
     polarity: 'suppress',
     severity: 0.55,
   },
+  threatLanguage: {
+    id: 'threat-language',
+    name: 'Possible coercive or violent language',
+    similarity: 0,
+    rationale:
+      'A phrase match is checked for repetition, media playback, and independent audio or motion evidence.',
+    polarity: 'risk',
+    severity: 0.82,
+  },
+  behaviorDeviation: {
+    id: 'behavior-deviation',
+    name: 'Deviation from learned routine',
+    similarity: 0,
+    rationale:
+      'Coarse location, movement intensity and travel speed differ from the encrypted on-device baseline. This is supporting evidence only.',
+    polarity: 'risk',
+    severity: 0.35,
+  },
 } satisfies Record<string, PatternDefinition>;
 
 function clip(value: number): number {
@@ -90,17 +126,27 @@ export function calculateMotionScore(motion: MotionFeatures): {
 } {
   if (motion.sampleCount < 3) return { score: 0, factors: [] };
   if (motion.impactAfterFreeFall) {
-    return { score: 0.97, factors: ['Ordered free-fall and impact sequence'] };
+    return {
+      score: 0.96,
+      factors: [
+        `Timed free-fall (${Math.round(motion.freeFallDurationMs)} ms) followed by impact`,
+      ],
+    };
   }
 
-  const acceleration = clip((motion.peakAccelerationG - 1.35) / 2.3);
-  const jerk = clip((motion.jerkRms - 4) / 22);
-  const rotation = clip((motion.rotationRms - 65) / 320);
+  const calibrated = scoreCalibratedMotion(motion);
   const factors: string[] = [];
-  if (acceleration >= 0.5) factors.push(`High acceleration (${motion.peakAccelerationG.toFixed(1)}g)`);
-  if (jerk >= 0.5) factors.push('Repeated abrupt movement');
-  if (rotation >= 0.5) factors.push('Rapid device rotation');
-  return { score: clip(0.52 * acceleration + 0.3 * jerk + 0.18 * rotation), factors };
+  if (calibrated.acceleration >= 0.5) {
+    factors.push(`High acceleration (${motion.peakAccelerationG.toFixed(1)}g)`);
+  }
+  if (calibrated.jerk >= 0.5) factors.push('Abrupt acceleration change');
+  if (calibrated.rotation >= 0.5) {
+    factors.push(`Rapid rotation (${Math.round(motion.peakRotationDps)}°/s)`);
+  }
+  if (calibrated.angularTravel >= 0.5) {
+    factors.push(`Large angular movement (${Math.round(motion.angularTravelDegrees)}°)`);
+  }
+  return { score: calibrated.score, factors };
 }
 
 function withSimilarity(pattern: PatternDefinition, similarity: number): PatternDefinition {
@@ -160,6 +206,43 @@ function expireSessions(now: number): void {
   }
 }
 
+function sessionMemoryFor(sessionId: string, now: number): SessionMemory {
+  const memory = sessions.get(sessionId) ?? {
+    windows: [],
+    threatMatches: [],
+    lastLevel: 'safe' as RiskLevel,
+    lastSeen: now,
+    incidentOpenUntil: 0,
+  };
+  memory.threatMatches ??= [];
+  return memory;
+}
+
+export function recordThreatLanguageMatch(
+  sessionId: string,
+  keyword: ThreatPhraseKeyword,
+  detectedAt = Date.now(),
+): boolean {
+  expireSessions(detectedAt);
+  const memory = sessionMemoryFor(sessionId, detectedAt);
+  memory.threatMatches = memory.threatMatches.filter(
+    (match) => detectedAt - match.detectedAt <= THREAT_MATCH_WINDOW_MS,
+  );
+  const duplicate = [...memory.threatMatches]
+    .reverse()
+    .find((match) => match.keyword === keyword);
+  if (
+    duplicate &&
+    detectedAt - duplicate.detectedAt < THREAT_DUPLICATE_COOLDOWN_MS
+  ) {
+    return false;
+  }
+  memory.threatMatches.push({ keyword, detectedAt });
+  memory.lastSeen = detectedAt;
+  sessions.set(sessionId, memory);
+  return true;
+}
+
 export function resetLocalSession(sessionId?: string): void {
   if (sessionId) sessions.delete(sessionId);
   else sessions.clear();
@@ -171,13 +254,39 @@ export async function assessLocalSignalWindow(input: {
   motion: MotionFeatures;
   context: { hour: number; appState: string };
   sessionId: string;
+  modelPreference: InferenceModelPreference;
+  behaviorDeviation?: BehaviorDeviationSignal | null;
 }): Promise<Assessment> {
   const startedAt = Date.now();
   const audio = input.audioBytes
-    ? await inferOnDeviceAudio(input.audioBytes, input.sampleRate)
+    ? await inferOnDeviceAudio(input.audioBytes, input.sampleRate, input.modelPreference)
     : unavailableAudioInference();
   const motion = calculateMotionScore(input.motion);
+  const now = Date.now();
+  expireSessions(now);
+  const memory = sessionMemoryFor(input.sessionId, now);
+  memory.threatMatches = memory.threatMatches.filter(
+    (match) => now - match.detectedAt <= THREAT_MATCH_WINDOW_MS,
+  );
+  const threat = scoreThreatLanguageSignal({
+    matches: memory.threatMatches,
+    now,
+    audioDistressScore: audio.distressScore,
+    motionScore: motion.score,
+    mediaScore: audio.mediaScore,
+  });
   const matches = retrievePatterns(audio, input.motion, motion.score);
+  if (threat.active) {
+    matches.push(withSimilarity(PATTERNS.threatLanguage, threat.score));
+  }
+  const behaviorDeviation = input.behaviorDeviation;
+  if (behaviorDeviation?.active && behaviorDeviation.ready) {
+    matches.push(
+      withSimilarity(PATTERNS.behaviorDeviation, behaviorDeviation.score),
+    );
+  }
+  matches.sort((left, right) => right.similarity - left.similarity);
+  matches.splice(3);
   const ragRisk = matches
     .filter((match) => match.polarity === 'risk')
     .reduce((highest, match) => Math.max(highest, match.similarity * match.severity), 0);
@@ -196,25 +305,23 @@ export async function assessLocalSignalWindow(input: {
     fused = 0.79 * motion.score + 0.21 * ragRisk;
   }
 
-  const multiSignal = audio.distressScore >= 0.48 && motion.score >= 0.42;
+  const audioMotionAgreement = audio.distressScore >= 0.48 && motion.score >= 0.42;
+  const multiSignal = audioMotionAgreement || threat.confirmed;
   if (multiSignal) fused += 0.12;
+  fused = Math.max(fused, threat.score);
+  if (behaviorDeviation?.active && behaviorDeviation.ready) {
+    const independentConcern = Math.max(audio.distressScore, motion.score);
+    fused +=
+      behaviorDeviation.score * (0.035 + 0.085 * independentConcern);
+  }
   const mediaPenalty = Math.min(
     Math.max(audio.mediaScore - audio.distressScore * 0.55, 0) * 0.4,
     0.22,
   );
   const isolatedSuppression = ragSuppression * (multiSignal ? 0.06 : 0.22);
   fused *= 1 - mediaPenalty - isolatedSuppression;
-  if (input.context.hour >= 22 || input.context.hour <= 5) fused *= 1.03;
   fused = clip(fused);
 
-  const now = Date.now();
-  expireSessions(now);
-  const memory = sessions.get(input.sessionId) ?? {
-    windows: [],
-    lastLevel: 'safe' as RiskLevel,
-    lastSeen: now,
-    incidentOpenUntil: 0,
-  };
   memory.lastSeen = now;
   memory.windows.push({
     audio: audio.distressScore,
@@ -238,7 +345,7 @@ export async function assessLocalSignalWindow(input: {
 
   let riskLevel: RiskLevel;
   let needsEvidenceCapture = false;
-  if (canOpenIncident && (exceptional || persistentMulti)) {
+  if (canOpenIncident && (exceptional || persistentMulti || threat.confirmed)) {
     riskLevel = 'sos';
     needsEvidenceCapture = true;
     memory.incidentOpenUntil = now + 120_000;
@@ -254,7 +361,12 @@ export async function assessLocalSignalWindow(input: {
   sessions.set(input.sessionId, memory);
 
   const factors = [...audio.factors, ...motion.factors];
-  if (multiSignal) factors.push('Audio and motion agree');
+  if (threat.factor) factors.push(threat.factor);
+  if (behaviorDeviation?.active && behaviorDeviation.ready) {
+    factors.push(...behaviorDeviation.factors);
+    factors.push('Routine deviation used as supporting evidence only');
+  }
+  if (audioMotionAgreement) factors.push('Audio and motion agree');
   if (persistentMulti) factors.push('Pattern confirmed across consecutive windows');
   if (audio.mediaScore >= 0.35) factors.push('Media-playback suppression applied');
 
@@ -281,7 +393,7 @@ export async function assessLocalSignalWindow(input: {
       similarity,
       rationale,
     })),
-    modelVersion: ON_DEVICE_MODEL_VERSION,
+    modelVersion: `${audio.modelVersion}+outdoor-ns-v1+threat-kws-v1+${BEHAVIOR_BASELINE_VERSION}+sensor-fusion-3.4.0`,
     latencyMs: Date.now() - startedAt,
   };
 }

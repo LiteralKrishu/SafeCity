@@ -27,6 +27,7 @@ function AppStack() {
     <>
       <StatusBar style={resolvedAppearance === 'dark' ? 'light' : 'dark'} />
       <Stack
+        key={resolvedAppearance}
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background },

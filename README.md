@@ -14,14 +14,15 @@ Continuous video analysis has been removed. A rolling 15-second pre-alert audio 
 - Added SQLCipher-encrypted local metadata and AES-GCM-encrypted evidence files.
 - Added consent, contextual permissions, emergency contacts, monitoring sessions, sensor health, tiered alert states, local history, false-alarm feedback, and deletion.
 - Added adaptive on-device inference cadence, an in-memory silence gate and Android battery-saver awareness.
-- Added an optional bundled offline “Help” / “Bachao” keyword spotter, real user-requested OpenStreetMap safe-haven/lighting data, compact emergency SMS payloads, native haptics, and an interactive TTS fake-call companion.
+- Added an optional bundled offline emergency-word and multilingual threat-phrase spotter, real user-requested OpenStreetMap safe-haven/lighting data, compact emergency SMS payloads, native haptics, and an interactive TTS fake-call companion.
+- Added opt-in anonymous community risk zones using client-side location coarsening, a bounded offline queue, rotating deduplication tokens and server-side crowd-threshold aggregation.
 
 ## Repository layout
 
 ```text
 SafeCity/
 ├── mobile/                 Expo / React Native app (no web target)
-├── service/                Legacy development oracle and policy tests (not used by the app)
+├── service/                Development oracle plus optional anonymous risk aggregation API
 ├── docs/                   Architecture, model card, and validation plan
 ├── docker-compose.yml      Optional service-side comparison tests
 └── Makefile                Common development commands
@@ -33,7 +34,11 @@ The official YAMNet TFLite model is stored at `mobile/assets/models/yamnet.tflit
 
 Inference cadence is adaptive: roughly every 3 seconds in ordinary foreground monitoring, 5 seconds in the background, and 6 seconds in Android battery saver. Concerning motion temporarily shortens the interval to 1.2 seconds (2 seconds in battery saver). These are realistic efficiency defaults, not a battery-life or accuracy guarantee; profile them across supported physical devices before release.
 
-The Python/Docker implementation remains only as a development comparison oracle for fusion-policy tests. It is not called, configured or required by the mobile app and is not included in an APK.
+The optional adaptive behavior check uses no additional ML runtime. Once per minute during active in-app monitoring it compares coarse routine area, motion intensity and accuracy-adjusted speed against bounded encrypted aggregate profiles. It warms up for at least 24 safe observations over three days, keeps no breadcrumb route, and can only support other distress evidence—not independently alert or activate SOS. The Local AI screen shows coverage and deviation factors, and Settings can clear or disable the learned baseline.
+
+The Python/Docker inference implementation remains a development comparison oracle for fusion-policy tests. It is not called or required for on-device monitoring and is not included in an APK.
+
+The only optional production network path owned by SafeCity is anonymous risk aggregation. When separately enabled, the app converts a distress location into an approximately 500-metre cell before transport and sends no audio, photos, contacts, exact GPS or stable device ID. Configure its HTTPS address with `EXPO_PUBLIC_RISK_API_BASE_URL`. See [ANONYMOUS_RISK_ZONES.md](docs/ANONYMOUS_RISK_ZONES.md).
 
 ## Build the native app
 
@@ -69,9 +74,10 @@ SafeCity deliberately prevents single-sensor auto-SOS decisions:
 1. Bundled YAMNet Lite scores 0.975-second, 16 kHz PCM windows against 521 AudioSet classes on the phone.
 2. Motion features detect acceleration, jerk, rotation, and an ordered free-fall → impact sequence.
 3. The local pattern index retrieves both risk patterns and common suppressors such as television playback, transport vibration, and a dropped phone.
-4. Context can adjust a fused score by at most 3% and can never create a threat.
-5. A typical automatic SOS requires audio-motion agreement in two consecutive windows. An exceptional scream plus fall-impact combination may bypass the second window.
-6. Audio-only distress and motion-only falls request a check-in; neither automatically captures evidence.
+4. If enabled and warmed up, the adaptive baseline may add a small supporting term for an unfamiliar coarse area or unusual movement; it never counts as an independent danger signal.
+5. Context can adjust a fused score by at most 3% and can never create a threat.
+6. A typical automatic SOS requires audio-motion agreement in two consecutive windows. An exceptional scream plus fall-impact combination may bypass the second window.
+7. Audio-only distress, motion-only falls and deviation-only events cannot automatically capture evidence.
 
 Thresholds are pilot defaults, not clinical or safety-certified guarantees. See [MODEL_CARD.md](docs/MODEL_CARD.md) before changing them.
 
@@ -79,7 +85,8 @@ Thresholds are pilot defaults, not clinical or safety-certified guarantees. See 
 
 - Monitoring PCM is held in phone memory, analyzed locally, and discarded. The latest 15 seconds remain in a volatile ring buffer and are encrypted as a WAV only if an SOS is confirmed.
 - Incident photos, the pre-alert WAV snapshot, and post-SOS audio are AES-GCM encrypted before temporary plaintext capture files are deleted.
-- The optional voice trigger uses an APK-bundled 3M-parameter Sherpa-ONNX model and the existing 16 kHz microphone stream. It needs no account, internet connection, or installed phone language pack. Detection quality, power use, and background continuity still vary by phone.
+- The optional voice trigger uses an APK-bundled 3M-parameter Sherpa-ONNX model and the existing 16 kHz microphone stream. Direct SOS words open the countdown immediately. Limited English, Hindi and Bengali coercion/threat phrases require a repeat plus independent distress-audio or motion agreement, and likely media playback is suppressed. It needs no account, internet connection, or installed phone language pack. Detection quality, power use, and background continuity still vary by phone.
+- The optional behavior baseline stores only encrypted coarse aggregate profiles. It rejects inaccurate GPS for location learning, updates at most once per minute, and can be erased without deleting incidents or contacts.
 - Safety Navigator sends the current coordinates to OpenStreetMap Overpass only after the user chooses to load real nearby places. Missing map data is never treated as proof that an area is unsafe.
 - Mobile operating systems prevent a background app from silently opening cameras. Automatic front/rear capture therefore occurs only while the protected SOS capture screen is visible. A background detection stores the incident and raises a local notification that opens this screen.
 - SMS APIs open the system composer. The user must press **Send**; the app must not claim delivery.

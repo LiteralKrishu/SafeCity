@@ -9,6 +9,10 @@ import {
   PROCESSING_CONSENT_VERSION,
   TERMS_VERSION,
 } from '@/legal/content';
+import {
+  allCorePermissionsGranted,
+  getCorePermissionSnapshot,
+} from '@/services/permissions';
 import { colors } from '@/theme/tokens';
 
 export default function IndexScreen() {
@@ -16,15 +20,18 @@ export default function IndexScreen() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
 
   useEffect(() => {
-    void readSettings(db).then((settings) =>
-      setOnboarded(
-        settings.onboardingComplete &&
-          settings.adultConfirmed &&
-          settings.consentVersion === PROCESSING_CONSENT_VERSION &&
-          settings.privacyNoticeVersion === PRIVACY_NOTICE_VERSION &&
-          settings.termsVersion === TERMS_VERSION,
-      ),
-    );
+    void Promise.all([readSettings(db), getCorePermissionSnapshot()])
+      .then(([settings, permissions]) =>
+        setOnboarded(
+          settings.onboardingComplete &&
+            settings.adultConfirmed &&
+            settings.consentVersion === PROCESSING_CONSENT_VERSION &&
+            settings.privacyNoticeVersion === PRIVACY_NOTICE_VERSION &&
+            settings.termsVersion === TERMS_VERSION &&
+            allCorePermissionsGranted(permissions),
+        ),
+      )
+      .catch(() => setOnboarded(false));
   }, [db]);
 
   if (onboarded === null) {

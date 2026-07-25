@@ -21,33 +21,83 @@ import {
   startSession,
   updateSession,
   updateIncidentSnapshotUri,
+  writeSettings,
 } from '@/db/repository';
 import {
   getCurrentLocation,
+  getRecentBackgroundLocation,
+  type SafeCityLocationFix,
   startBackgroundLocation,
   stopBackgroundLocation,
 } from '@/services/backgroundLocation';
 import {
+  assessBehaviorDeviation,
+  BEHAVIOR_OBSERVATION_INTERVAL_MS,
+  createBehaviorObservation,
+  disabledBehaviorBaselineTelemetry,
+  getBehaviorBaselineStatus,
+  learnBehaviorObservation,
+  resetBehaviorBaseline,
+  type BehaviorBaselineStatus,
+  type BehaviorDeviationSignal,
+  type BehaviorLocationSample,
+  type BehaviorObservation,
+} from '@/inference/behaviorBaseline';
+import {
   assessLocalSignalWindow,
   calculateMotionScore,
+  recordThreatLanguageMatch,
   resetLocalSession,
 } from '@/inference/localFusion';
 import {
+  getThreatPhrase,
+  isThreatPhraseKeyword,
+} from '@/inference/threatLanguage';
+import {
   initializeOnDeviceAudio,
+  LITE_MODEL_VERSION,
   YAMNET_INPUT_SAMPLES,
   YAMNET_SAMPLE_RATE,
 } from '@/inference/onDeviceAudio';
+import { resolveInferenceModel } from '@/inference/modelProfiles';
 import { useLocalization } from '@/i18n/localization-provider';
+import {
+  PRIVACY_NOTICE_VERSION,
+  PROCESSING_CONSENT_VERSION,
+  TERMS_VERSION,
+} from '@/legal/content';
 import { triggerHaptic } from '@/services/haptics';
 import { encryptEvidenceBytes } from '@/services/evidence';
-import { getSensorHealth } from '@/services/permissions';
+import {
+  allCorePermissionsGranted,
+  getCorePermissionSnapshot,
+  getSensorHealth,
+} from '@/services/permissions';
+import {
+  addPersistentSafetyTriggerListener,
+  addPersistentVoiceTriggerListener,
+  disablePersistentProtection,
+  disablePersistentVoiceTrigger,
+  enablePersistentProtection,
+  enableVoiceTrigger,
+  getPersistentVoiceTriggerState,
+  isPersistentVoiceTriggerAvailable,
+  rearmPersistentVoiceTrigger,
+  setPersistentProtectionActive,
+  setPersistentVoiceTriggerListening,
+} from '@/services/persistent-voice-trigger';
 import {
   isVoiceTriggerAvailable,
   processVoiceTriggerPcm,
   releaseVoiceTriggerRecognition,
   startVoiceTriggerRecognition,
   stopVoiceTriggerRecognition,
+  type EmergencyVoiceTriggerKeyword,
 } from '@/services/voice-trigger';
+import {
+  queueAnonymousDistressReport,
+  type AnonymousDistressSource,
+} from '@/services/riskZones';
 import { useMonitorStore } from '@/store/monitorStore';
 import type { Assessment } from '@/types/domain';
 import { localFallbackAssessment } from '@/utils/fallbackAssessment';
@@ -69,9 +119,16 @@ interface MonitoringActions {
   resumeMonitoring: () => Promise<void>;
   stopMonitoring: () => Promise<void>;
   triggerManualSos: () => Promise<void>;
+  triggerVoiceSos: () => Promise<void>;
+  triggerMotionSos: () => Promise<void>;
+  triggerAudioSos: () => Promise<void>;
+  rearmVoiceTrigger: () => Promise<void>;
+  setBehaviorBaselineEnabled: (enabled: boolean) => Promise<void>;
   setVoiceTriggerEnabled: (enabled: boolean) => Promise<void>;
   suspendForEvidence: () => Promise<void>;
   resumeAfterEvidence: () => Promise<void>;
+  suspendForSiren: () => Promise<void>;
+  resumeAfterSiren: () => Promise<void>;
 }
 
 const MonitoringContext = createContext<MonitoringActions | null>(null);
@@ -84,6 +141,135 @@ const SNAPSHOT_WINDOW_MS = 15_000;
 const SNAPSHOT_PCM_BYTES = Math.round((SNAPSHOT_WINDOW_MS * YAMNET_SAMPLE_RATE * 2) / 1_000);
 const VOICE_TRIGGER_BATCH_BYTES = Math.round(YAMNET_SAMPLE_RATE * 2 * 0.16);
 const VOICE_TRIGGER_MAX_PENDING_BYTES = YAMNET_SAMPLE_RATE * 2 * 4;
+const AUDIO_SPECTRUM_BAR_COUNT = 36;
+const AUDIO_SPECTRUM_MIN_HZ = 80;
+const AUDIO_SPECTRUM_MAX_HZ = 4_000;
+const AUDIO_SPECTRUM_FRAME_SIZE = 512;
+const ACTIVE_MOTION_INTERVAL_MS = 20;
+const LOW_POWER_MOTION_INTERVAL_MS = 40;
+const audioSpectrumWindows = new Map<number, number[]>();
+
+function hasCurrentMonitoringConsent(settings: {
+  consentVersion: string | null;
+  privacyNoticeVersion: string | null;
+  termsVersion: string | null;
+}): boolean {
+  return (
+    settings.consentVersion === PROCESSING_CONSENT_VERSION &&
+    settings.privacyNoticeVersion === PRIVACY_NOTICE_VERSION &&
+    settings.termsVersion === TERMS_VERSION
+  );
+}
+
+function behaviorTelemetry(
+  enabled: boolean,
+  status?: BehaviorBaselineStatus,
+  signal?: BehaviorDeviationSignal | null,
+) {
+  if (!enabled) return disabledBehaviorBaselineTelemetry();
+  const resolvedStatus = status ?? signal?.status;
+  return {
+    enabled: true,
+    phase: resolvedStatus?.phase ?? 'warming',
+    ready: resolvedStatus?.ready ?? false,
+    sampleCount: resolvedStatus?.sampleCount ?? 0,
+    dayCount: resolvedStatus?.dayCount ?? 0,
+    profileCount: resolvedStatus?.profileCount ?? 0,
+    locationProfileCount: resolvedStatus?.locationProfileCount ?? 0,
+    progress: resolvedStatus?.progress ?? 0,
+    lastLearnedAt: resolvedStatus?.lastLearnedAt ?? null,
+    deviationScore: signal?.score ?? 0,
+    factors: signal?.factors ?? [],
+  };
+}
+
+interface AudioSignalAnalysis {
+  level: number;
+  dbFs: number;
+  spectrum: number[];
+  dominantFrequencyHz: number | null;
+}
+
+function spectrumWindow(frameSize: number): number[] {
+  const cached = audioSpectrumWindows.get(frameSize);
+  if (cached) return cached;
+  const window = Array.from(
+    { length: frameSize },
+    (_, index) => 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / (frameSize - 1)),
+  );
+  audioSpectrumWindows.set(frameSize, window);
+  return window;
+}
+
+function analyzeAudioSignal(
+  samples: Int16Array,
+  sampleRate: number,
+  previousSpectrum: number[],
+): AudioSignalAnalysis {
+  if (samples.length < 32) {
+    return {
+      level: 0,
+      dbFs: -96,
+      spectrum: Array.from({ length: AUDIO_SPECTRUM_BAR_COUNT }, () => 0),
+      dominantFrequencyHz: null,
+    };
+  }
+
+  let sumSquares = 0;
+  let sampleCount = 0;
+  for (let index = 0; index < samples.length; index += 4) {
+    const sample = (samples[index] ?? 0) / 32_768;
+    sumSquares += sample * sample;
+    sampleCount += 1;
+  }
+  const rms = sampleCount ? Math.sqrt(sumSquares / sampleCount) : 0;
+  const dbFs = rms > 0 ? Math.max(-96, 20 * Math.log10(rms)) : -96;
+  const frameSize = Math.min(AUDIO_SPECTRUM_FRAME_SIZE, samples.length);
+  const frameStart = samples.length - frameSize;
+  const window = spectrumWindow(frameSize);
+  const maxFrequency = Math.min(AUDIO_SPECTRUM_MAX_HZ, sampleRate * 0.45);
+  const spectrum: number[] = [];
+  let dominantMagnitude = 0;
+  let dominantFrequencyHz: number | null = null;
+
+  for (let barIndex = 0; barIndex < AUDIO_SPECTRUM_BAR_COUNT; barIndex += 1) {
+    const progress = barIndex / (AUDIO_SPECTRUM_BAR_COUNT - 1);
+    const frequency =
+      AUDIO_SPECTRUM_MIN_HZ *
+      Math.pow(maxFrequency / AUDIO_SPECTRUM_MIN_HZ, progress);
+    const coefficient = 2 * Math.cos((2 * Math.PI * frequency) / sampleRate);
+    let q1 = 0;
+    let q2 = 0;
+
+    for (let sampleIndex = 0; sampleIndex < frameSize; sampleIndex += 1) {
+      const sample =
+        ((samples[frameStart + sampleIndex] ?? 0) / 32_768) *
+        (window[sampleIndex] ?? 0);
+      const q0 = coefficient * q1 - q2 + sample;
+      q2 = q1;
+      q1 = q0;
+    }
+
+    const power = Math.max(0, q1 * q1 + q2 * q2 - coefficient * q1 * q2);
+    const magnitude = Math.sqrt(power) / Math.max(1, frameSize * 0.5);
+    const bandDb = 20 * Math.log10(Math.max(magnitude, 0.000_001));
+    const normalized = Math.max(0, Math.min(1, (bandDb + 96) / 78));
+    const previous = previousSpectrum[barIndex] ?? 0;
+    spectrum.push(previous * 0.62 + Math.pow(normalized, 0.78) * 0.38);
+
+    if (magnitude > dominantMagnitude) {
+      dominantMagnitude = magnitude;
+      dominantFrequencyHz = Math.round(frequency);
+    }
+  }
+
+  return {
+    level: Math.min(1, rms * 5),
+    dbFs,
+    spectrum,
+    dominantFrequencyHz: dbFs > -90 ? dominantFrequencyHz : null,
+  };
+}
 
 function requiredPcmBytes(sampleRate: number): number {
   return Math.round((sampleRate * YAMNET_INPUT_SAMPLES * 2) / YAMNET_SAMPLE_RATE);
@@ -111,6 +297,9 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   const motionSubscription = useRef<ReturnType<typeof DeviceMotion.addListener> | null>(null);
   const audioChunks = useRef<Uint8Array[]>([]);
   const audioBytes = useRef(0);
+  const audioSpectrum = useRef<number[]>(
+    Array.from({ length: AUDIO_SPECTRUM_BAR_COUNT }, () => 0),
+  );
   const snapshotChunks = useRef<Uint8Array[]>([]);
   const snapshotBytes = useRef(0);
   const inferenceBusy = useRef(false);
@@ -119,9 +308,10 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   const lastMotionTelemetryAt = useRef(0);
   const lastInferenceAt = useRef(0);
   const lowPowerMode = useRef(false);
-  const latestLocation = useRef<{ latitude: number; longitude: number } | null>(null);
+  const latestLocation = useRef<SafeCityLocationFix | null>(null);
   const locationUpdatedAt = useRef(0);
   const appState = useRef<AppStateStatus>(AppState.currentState);
+  const sensorSuspensions = useRef(new Set<'evidence' | 'siren'>());
   const submitBufferedAudioRef = useRef<(sampleRate: number) => Promise<void>>(async () => undefined);
   const shouldAnalyzeRef = useRef<() => boolean>(() => false);
   const voiceTriggerEnabled = useRef(false);
@@ -130,12 +320,27 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   const voiceInferenceBusy = useRef(false);
   const voicePcmChunks = useRef<Uint8Array[]>([]);
   const voicePcmBytes = useRef(0);
+  const behaviorBaselineEnabled = useRef(false);
+  const lastBehaviorObservationAt = useRef(0);
+  const previousBehaviorLocation = useRef<BehaviorLocationSample | null>(null);
+  const behaviorDeviation = useRef<BehaviorDeviationSignal | null>(null);
   const flushVoiceAudioRef = useRef<(sampleRate: number) => Promise<void>>(
     async () => undefined,
   );
-  const triggerVoiceSosRef = useRef<() => Promise<void>>(async () => undefined);
+  const showVoiceCountdownRef = useRef<
+    (keyword: EmergencyVoiceTriggerKeyword) => Promise<void>
+  >(
+    async () => undefined,
+  );
+  const showSafetyCountdownRef = useRef<
+    (source: 'motion' | 'audio' | 'threat', label: string) => Promise<void>
+  >(async () => undefined);
+  const syncPersistentVoiceTriggerRef = useRef<() => Promise<void>>(
+    async () => undefined,
+  );
 
   shouldAnalyzeRef.current = () => {
+    if (sensorSuspensions.current.size > 0) return false;
     const motion = motionWindow.current.snapshot();
     const motionScore = calculateMotionScore(motion).score;
     const elevated = motion.impactAfterFreeFall || motionScore >= 0.35;
@@ -152,7 +357,12 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   };
 
   const handleAudioBuffer = useCallback((buffer: AudioStreamBuffer) => {
-    if (useMonitorStore.getState().sessionState !== 'monitoring') return;
+    if (
+      sensorSuspensions.current.size > 0 ||
+      useMonitorStore.getState().sessionState !== 'monitoring'
+    ) {
+      return;
+    }
     const chunk = new Uint8Array(buffer.data).slice();
     audioChunks.current.push(chunk);
     audioBytes.current += chunk.byteLength;
@@ -177,16 +387,13 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     lastAudioAt.current = Date.now();
     if (lastAudioAt.current - lastAudioTelemetryAt.current >= 250) {
       const samples = new Int16Array(buffer.data);
-      let sumSquares = 0;
-      let sampleCount = 0;
-      for (let index = 0; index < samples.length; index += 4) {
-        const sample = samples[index] ?? 0;
-        sumSquares += sample * sample;
-        sampleCount += 1;
-      }
-      const rms = sampleCount ? Math.sqrt(sumSquares / sampleCount) / 32_768 : 0;
+      const analysis = analyzeAudioSignal(samples, buffer.sampleRate, audioSpectrum.current);
+      audioSpectrum.current = analysis.spectrum;
       useMonitorStore.getState().setTelemetry({
-        audioLevel: Math.min(1, rms * 5),
+        audioLevel: analysis.level,
+        audioDbFs: analysis.dbFs,
+        audioSpectrum: analysis.spectrum,
+        dominantFrequencyHz: analysis.dominantFrequencyHz,
         audioUpdatedAt: lastAudioAt.current,
       });
       lastAudioTelemetryAt.current = lastAudioAt.current;
@@ -218,15 +425,29 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     onBuffer: handleAudioBuffer,
   });
 
-  const refreshLocation = useCallback(async () => {
-    if (Date.now() - locationUpdatedAt.current < 30_000) return;
+  const refreshLocation = useCallback(async (force = false) => {
+    if (!force && Date.now() - locationUpdatedAt.current < 30_000) return;
     try {
-      latestLocation.current = await getCurrentLocation();
-      locationUpdatedAt.current = Date.now();
+      const refreshedLocation = await getCurrentLocation();
+      if (refreshedLocation) {
+        latestLocation.current = refreshedLocation;
+      }
       if (latestLocation.current) {
+        locationUpdatedAt.current = latestLocation.current.timestamp;
         useMonitorStore.getState().setTelemetry({
-          location: { ...latestLocation.current, accuracy: null },
+          location: {
+            latitude: latestLocation.current.latitude,
+            longitude: latestLocation.current.longitude,
+            accuracy: latestLocation.current.accuracy,
+          },
           locationUpdatedAt: locationUpdatedAt.current,
+        });
+        useMonitorStore.getState().setHealth({
+          location:
+            latestLocation.current.accuracy === null ||
+            latestLocation.current.accuracy <= 100
+              ? 'ready'
+              : 'degraded',
         });
       }
     } catch {
@@ -239,13 +460,30 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     snapshotBytes.current = 0;
   }, []);
 
+  const refreshBehaviorBaselineStatus = useCallback(async () => {
+    if (!behaviorBaselineEnabled.current) {
+      useMonitorStore.getState().setTelemetry({
+        behaviorBaseline: disabledBehaviorBaselineTelemetry(),
+      });
+      return;
+    }
+    const status = await getBehaviorBaselineStatus(db);
+    useMonitorStore.getState().setTelemetry({
+      behaviorBaseline: behaviorTelemetry(
+        true,
+        status,
+        behaviorDeviation.current,
+      ),
+    });
+  }, [db]);
+
   const stopVoiceTrigger = useCallback(() => {
     voiceTriggerArmed.current = false;
     voicePcmChunks.current = [];
     voicePcmBytes.current = 0;
     void stopVoiceTriggerRecognition().catch(() => undefined);
     useMonitorStore.getState().setTelemetry({
-      voiceTriggerStatus: 'disabled',
+      voiceTriggerStatus: voiceTriggerEnabled.current ? 'listening' : 'disabled',
       voiceTriggerTranscript: null,
     });
   }, []);
@@ -255,6 +493,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     if (
       !voiceTriggerEnabled.current ||
       state.sessionState !== 'monitoring' ||
+      sensorSuspensions.current.size > 0 ||
       state.activeIncidentId
     ) {
       return;
@@ -274,6 +513,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
           !voiceTriggerArmed.current ||
           !voiceTriggerEnabled.current ||
           current.sessionState !== 'monitoring' ||
+          sensorSuspensions.current.size > 0 ||
           current.activeIncidentId
         ) {
           void stopVoiceTriggerRecognition().catch(() => undefined);
@@ -286,6 +526,21 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
         useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'error' });
       });
   }, []);
+
+  const syncPersistentVoiceTrigger = useCallback(async () => {
+    if (!isPersistentVoiceTriggerAvailable() || !voiceTriggerEnabled.current) return;
+    const state = useMonitorStore.getState();
+    const shouldListenNatively =
+      !state.activeIncidentId &&
+      sensorSuspensions.current.size === 0 &&
+      (appState.current !== 'active' || state.sessionState !== 'monitoring');
+    await setPersistentVoiceTriggerListening(shouldListenNatively);
+    state.setTelemetry({
+      voiceTriggerStatus: shouldListenNatively ? 'listening' : state.telemetry.voiceTriggerStatus,
+    });
+  }, []);
+
+  syncPersistentVoiceTriggerRef.current = syncPersistentVoiceTrigger;
 
   const persistAudioSnapshot = useCallback(
     async (incidentId: string): Promise<string | null> => {
@@ -309,12 +564,25 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     [clearAudioSnapshotBuffer, db],
   );
 
+  const shareAnonymousDistress = useCallback(
+    async (source: AnonymousDistressSource) => {
+      try {
+        const settings = await readSettings(db);
+        if (!settings.anonymousRiskSharingEnabled) return;
+        await queueAnonymousDistressReport(db, latestLocation.current, source);
+      } catch {
+        // Community reporting is best-effort and must never delay or block SOS.
+      }
+    },
+    [db],
+  );
+
   const openEvidenceCapture = useCallback(
     async (assessment: Assessment) => {
       const state = useMonitorStore.getState();
       if (state.activeIncidentId) return;
       await triggerHaptic('sos');
-      await refreshLocation();
+      await refreshLocation(true);
       const incidentId = await createIncident(
         db,
         assessment,
@@ -322,6 +590,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
         latestLocation.current,
       );
       state.setActiveIncident(incidentId);
+      await shareAnonymousDistress('confirmed');
       await persistAudioSnapshot(incidentId);
       await triggerHaptic('warning');
 
@@ -340,14 +609,81 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
         });
       }
     },
-    [audioStream.stream, db, persistAudioSnapshot, refreshLocation, router, t],
+    [
+      audioStream.stream,
+      db,
+      persistAudioSnapshot,
+      refreshLocation,
+      router,
+      shareAnonymousDistress,
+      t,
+    ],
   );
 
   const submitWindow = useCallback(
     async (pcmBytes: Uint8Array | null, sampleRate: number) => {
       const state = useMonitorStore.getState();
-      if (state.sessionState !== 'monitoring' || !state.sessionId) return;
+      if (
+        sensorSuspensions.current.size > 0 ||
+        state.sessionState !== 'monitoring' ||
+        !state.sessionId
+      ) {
+        return;
+      }
       const motion = motionWindow.current.snapshot();
+      let observationToLearn: BehaviorObservation | null = null;
+      const observedAt = Date.now();
+      if (
+        behaviorBaselineEnabled.current &&
+        appState.current === 'active' &&
+        observedAt - lastBehaviorObservationAt.current >=
+          BEHAVIOR_OBSERVATION_INTERVAL_MS
+      ) {
+        lastBehaviorObservationAt.current = observedAt;
+        const recentLocation = await getRecentBackgroundLocation().catch(
+          () => null,
+        );
+        if (
+          recentLocation &&
+          (!latestLocation.current ||
+            recentLocation.timestamp > latestLocation.current.timestamp)
+        ) {
+          latestLocation.current = recentLocation;
+        }
+        const behaviorLocation: BehaviorLocationSample | null =
+          latestLocation.current &&
+          observedAt - latestLocation.current.timestamp <= 3 * 60_000
+            ? latestLocation.current
+            : null;
+        observationToLearn = createBehaviorObservation({
+          observedAt,
+          motionScore: calculateMotionScore(motion).score,
+          location: behaviorLocation,
+          previousLocation: previousBehaviorLocation.current,
+        });
+        if (
+          behaviorLocation &&
+          behaviorLocation.accuracy !== null &&
+          behaviorLocation.accuracy <= 120
+        ) {
+          previousBehaviorLocation.current = behaviorLocation;
+        }
+        try {
+          behaviorDeviation.current = await assessBehaviorDeviation(
+            db,
+            observationToLearn,
+          );
+          state.setTelemetry({
+            behaviorBaseline: behaviorTelemetry(
+              true,
+              behaviorDeviation.current.status,
+              behaviorDeviation.current,
+            ),
+          });
+        } catch {
+          behaviorDeviation.current = null;
+        }
+      }
       let assessment: Assessment;
       try {
         assessment = await assessLocalSignalWindow({
@@ -355,24 +691,48 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
           sessionId: state.sessionId,
           sampleRate,
           motion,
+          modelPreference: state.inferenceModelPreference,
+          behaviorDeviation: behaviorDeviation.current,
           context: {
             hour: new Date().getHours(),
             appState: appState.current,
           },
         });
-        state.setHealth({ inference: 'ready' });
+        const expectedModel = resolveInferenceModel(state.inferenceModelPreference);
+        const usedLiteFallback =
+          expectedModel === 'yamnet' &&
+          assessment.modelVersion.includes(LITE_MODEL_VERSION);
+        state.setHealth({ inference: usedLiteFallback ? 'degraded' : 'ready' });
       } catch {
         assessment = localFallbackAssessment(motion);
-        state.setHealth({ inference: 'offline' });
+        state.setHealth({ inference: 'degraded' });
       }
 
+      if (sensorSuspensions.current.size > 0) return;
       state.setAssessment(assessment);
+      if (
+        observationToLearn &&
+        assessment.riskLevel === 'safe' &&
+        !assessment.needsEvidenceCapture
+      ) {
+        void learnBehaviorObservation(db, observationToLearn)
+          .then((status) => {
+            useMonitorStore.getState().setTelemetry({
+              behaviorBaseline: behaviorTelemetry(
+                true,
+                status,
+                behaviorDeviation.current,
+              ),
+            });
+          })
+          .catch(() => undefined);
+      }
       if (assessment.riskLevel === 'alert') {
         await triggerHaptic('warning');
       }
       if (assessment.needsEvidenceCapture) await openEvidenceCapture(assessment);
     },
-    [openEvidenceCapture],
+    [db, openEvidenceCapture],
   );
 
   submitBufferedAudioRef.current = async (sampleRate: number) => {
@@ -399,17 +759,32 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
 
   const activateSensors = useCallback(async () => {
     const state = useMonitorStore.getState();
+    if (isPersistentVoiceTriggerAvailable()) {
+      // The visible app owns motion analysis while active. Pause the native
+      // copy to avoid duplicate sensor work; onTaskRemoved and the AppState
+      // handoff restore it before the UI goes away.
+      await setPersistentProtectionActive(false);
+    }
+    if (voiceTriggerEnabled.current && isPersistentVoiceTriggerAvailable()) {
+      await setPersistentVoiceTriggerListening(false);
+    }
     const health = await getSensorHealth();
     state.setHealth(health);
 
     if (health.motion === 'ready' && !motionSubscription.current) {
-      DeviceMotion.setUpdateInterval(100);
+      DeviceMotion.setUpdateInterval(
+        lowPowerMode.current ? LOW_POWER_MOTION_INTERVAL_MS : ACTIVE_MOTION_INTERVAL_MS,
+      );
       motionSubscription.current = DeviceMotion.addListener((measurement) => {
         motionWindow.current.add(measurement);
         const now = Date.now();
         if (now - lastMotionTelemetryAt.current >= 250) {
           const acceleration = measurement.accelerationIncludingGravity ?? measurement.acceleration;
           if (acceleration) {
+            const rotation = measurement.rotationRate;
+            const rotationXDegPerSecond = rotation?.alpha ?? 0;
+            const rotationYDegPerSecond = rotation?.beta ?? 0;
+            const rotationZDegPerSecond = rotation?.gamma ?? 0;
             useMonitorStore.getState().setTelemetry({
               motion: {
                 x: acceleration.x / DeviceMotion.Gravity,
@@ -418,6 +793,14 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
                 magnitudeG:
                   Math.sqrt(acceleration.x ** 2 + acceleration.y ** 2 + acceleration.z ** 2) /
                   DeviceMotion.Gravity,
+                rotationXDegPerSecond,
+                rotationYDegPerSecond,
+                rotationZDegPerSecond,
+                rotationMagnitudeDegPerSecond: Math.sqrt(
+                  rotationXDegPerSecond ** 2 +
+                    rotationYDegPerSecond ** 2 +
+                    rotationZDegPerSecond ** 2,
+                ),
               },
               motionUpdatedAt: now,
             });
@@ -455,51 +838,85 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     audioBytes.current = 0;
     clearAudioSnapshotBuffer();
     lastAudioAt.current = 0;
-    useMonitorStore.getState().setTelemetry({ audioLevel: 0 });
+    audioSpectrum.current = Array.from({ length: AUDIO_SPECTRUM_BAR_COUNT }, () => 0);
+    useMonitorStore.getState().setTelemetry({
+      audioLevel: 0,
+      audioDbFs: -96,
+      audioSpectrum: audioSpectrum.current,
+      dominantFrequencyHz: null,
+    });
   }, [audioStream.stream, clearAudioSnapshotBuffer, stopVoiceTrigger]);
 
   const startMonitoring = useCallback(async () => {
     const state = useMonitorStore.getState();
     if (state.sessionState !== 'idle') return;
-    const settings = await readSettings(db);
+    sensorSuspensions.current.clear();
+    let settings = await readSettings(db);
+    if (!hasCurrentMonitoringConsent(settings)) {
+      throw new Error('Complete the updated onboarding consent before monitoring starts.');
+    }
+    if (settings.voiceKeywordEnabled && isPersistentVoiceTriggerAvailable()) {
+      const persistentState = await getPersistentVoiceTriggerState();
+      if (persistentState.configured && !persistentState.enabled) {
+        settings = { ...settings, voiceKeywordEnabled: false };
+        await writeSettings(db, settings);
+      }
+    }
     voiceTriggerEnabled.current = settings.voiceKeywordEnabled;
+    behaviorBaselineEnabled.current = settings.behaviorBaselineEnabled;
+    behaviorDeviation.current = null;
+    lastBehaviorObservationAt.current = 0;
+    previousBehaviorLocation.current = null;
+    await refreshBehaviorBaselineStatus();
+    if (!settings.monitoringEnabled) {
+      settings = { ...settings, monitoringEnabled: true };
+      await writeSettings(db, settings);
+    }
+    await enablePersistentProtection();
+    state.setInferenceModelPreference(settings.inferenceModel);
     const id = await startSession(db);
     state.setSession('monitoring', id);
     state.setHealth({ inference: 'checking' });
     clearAudioSnapshotBuffer();
     lastInferenceAt.current = Date.now();
     lastAudioAt.current = Date.now();
-    const modelReady = initializeOnDeviceAudio()
-      .then(() => true)
-      .catch(() => false);
-    const [, onDeviceModelReady] = await Promise.all([activateSensors(), modelReady]);
-    state.setHealth({ inference: onDeviceModelReady ? 'ready' : 'offline' });
+    const modelReady = initializeOnDeviceAudio(settings.inferenceModel);
+    const [, preparation] = await Promise.all([activateSensors(), modelReady]);
+    state.setHealth({ inference: preparation.fallbackUsed ? 'degraded' : 'ready' });
     void refreshLocation();
     if (settings.backgroundLocation) {
       void startBackgroundLocation().catch(() => state.setHealth({ location: 'degraded' }));
     }
-  }, [activateSensors, clearAudioSnapshotBuffer, db, refreshLocation]);
+  }, [
+    activateSensors,
+    clearAudioSnapshotBuffer,
+    db,
+    refreshBehaviorBaselineStatus,
+    refreshLocation,
+  ]);
 
   const pauseMonitoring = useCallback(async () => {
     const state = useMonitorStore.getState();
     if (!state.sessionId || state.sessionState !== 'monitoring') return;
     deactivateSensors();
+    await disablePersistentProtection();
     await stopBackgroundLocation();
     await updateSession(db, state.sessionId, 'paused');
     state.setSession('paused', state.sessionId);
-  }, [db, deactivateSensors]);
+    await syncPersistentVoiceTrigger();
+  }, [db, deactivateSensors, syncPersistentVoiceTrigger]);
 
   const resumeMonitoring = useCallback(async () => {
     const state = useMonitorStore.getState();
     if (!state.sessionId || state.sessionState !== 'paused') return;
     await updateSession(db, state.sessionId, 'monitoring');
+    await enablePersistentProtection();
     state.setSession('monitoring', state.sessionId);
     state.setHealth({ inference: 'checking' });
-    const modelReady = initializeOnDeviceAudio()
-      .then(() => true)
-      .catch(() => false);
+    const modelReady = initializeOnDeviceAudio(state.inferenceModelPreference);
     await activateSensors();
-    state.setHealth({ inference: (await modelReady) ? 'ready' : 'offline' });
+    const preparation = await modelReady;
+    state.setHealth({ inference: preparation.fallbackUsed ? 'degraded' : 'ready' });
     void startBackgroundLocation().catch(() => state.setHealth({ location: 'degraded' }));
   }, [activateSensors, db]);
 
@@ -507,34 +924,89 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     async (enabled: boolean) => {
       voiceTriggerEnabled.current = enabled;
       const state = useMonitorStore.getState();
-      if (enabled && state.sessionState === 'monitoring') {
+      if (!enabled) {
+        stopVoiceTrigger();
+        await disablePersistentVoiceTrigger();
+        state.setTelemetry({
+          voiceTriggerStatus: 'disabled',
+          voiceTriggerTranscript: null,
+        });
+        return;
+      }
+
+      if (isPersistentVoiceTriggerAvailable()) {
+        const nativeState = await getPersistentVoiceTriggerState();
+        if (!nativeState.enabled) {
+          const preparation = await enableVoiceTrigger(
+            appState.current !== 'active' || state.sessionState !== 'monitoring',
+          );
+          if (!preparation.ready) {
+            voiceTriggerEnabled.current = false;
+            state.setTelemetry({ voiceTriggerStatus: 'error' });
+            throw new Error(preparation.message);
+          }
+        }
+        await syncPersistentVoiceTrigger();
+      } else if (state.sessionState === 'monitoring') {
         startVoiceTrigger();
       } else {
         stopVoiceTrigger();
       }
     },
-    [startVoiceTrigger, stopVoiceTrigger],
+    [startVoiceTrigger, stopVoiceTrigger, syncPersistentVoiceTrigger],
+  );
+
+  const setBehaviorBaselineEnabled = useCallback(
+    async (enabled: boolean) => {
+      behaviorBaselineEnabled.current = enabled;
+      behaviorDeviation.current = null;
+      lastBehaviorObservationAt.current = 0;
+      previousBehaviorLocation.current = null;
+      if (!enabled) {
+        await resetBehaviorBaseline(db);
+        useMonitorStore.getState().setTelemetry({
+          behaviorBaseline: disabledBehaviorBaselineTelemetry(),
+        });
+        return;
+      }
+      await refreshBehaviorBaselineStatus();
+    },
+    [db, refreshBehaviorBaselineStatus],
   );
 
   const stopMonitoring = useCallback(async () => {
     const state = useMonitorStore.getState();
+    sensorSuspensions.current.clear();
     deactivateSensors();
     await stopBackgroundLocation();
     if (state.sessionId) await updateSession(db, state.sessionId, 'stopped');
     resetLocalSession(state.sessionId ?? undefined);
+    lastBehaviorObservationAt.current = 0;
+    previousBehaviorLocation.current = null;
+    behaviorDeviation.current = null;
     clearAudioSnapshotBuffer();
     state.setSession('idle', null);
     state.resetRisk();
-  }, [clearAudioSnapshotBuffer, db, deactivateSensors]);
+    await disablePersistentProtection();
+    const settings = await readSettings(db);
+    await writeSettings(db, { ...settings, monitoringEnabled: false });
+    await syncPersistentVoiceTrigger();
+  }, [clearAudioSnapshotBuffer, db, deactivateSensors, syncPersistentVoiceTrigger]);
 
   const triggerDirectSos = useCallback(
-    async (source: 'manual' | 'voice') => {
+    async (source: 'manual' | 'voice' | 'motion' | 'audio') => {
       const state = useMonitorStore.getState();
       if (state.activeIncidentId) return;
       await triggerHaptic('sos');
-      await refreshLocation();
+      await refreshLocation(true);
       const explanation =
-        source === 'voice' ? t('monitor.voiceSos') : t('monitor.manualSos');
+        source === 'voice'
+          ? t('monitor.voiceSos')
+          : source === 'motion'
+            ? t('monitor.motionSos')
+            : source === 'audio'
+              ? t('monitor.audioSos')
+              : t('monitor.manualSos');
       const assessment: Assessment = {
         assessmentId: `${source}-${Date.now()}`,
         riskLevel: 'sos',
@@ -553,14 +1025,25 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
         assessment,
         state.sessionId,
         latestLocation.current,
-        source,
+        source === 'motion' || source === 'audio' ? 'automatic' : source,
       );
       state.setActiveIncident(incidentId);
+      await shareAnonymousDistress(source);
       await persistAudioSnapshot(incidentId);
       deactivateSensors();
+      await syncPersistentVoiceTrigger();
       router.push({ pathname: '/capture', params: { incidentId } });
     },
-    [db, deactivateSensors, persistAudioSnapshot, refreshLocation, router, t],
+    [
+      db,
+      deactivateSensors,
+      persistAudioSnapshot,
+      refreshLocation,
+      router,
+      shareAnonymousDistress,
+      syncPersistentVoiceTrigger,
+      t,
+    ],
   );
 
   const triggerManualSos = useCallback(
@@ -573,7 +1056,53 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     [triggerDirectSos],
   );
 
-  triggerVoiceSosRef.current = triggerVoiceSos;
+  const triggerMotionSos = useCallback(
+    async () => triggerDirectSos('motion'),
+    [triggerDirectSos],
+  );
+
+  const triggerAudioSos = useCallback(
+    async () => triggerDirectSos('audio'),
+    [triggerDirectSos],
+  );
+
+  const showVoiceCountdown = useCallback(
+    async (keyword: EmergencyVoiceTriggerKeyword) => {
+      const state = useMonitorStore.getState();
+      if (state.activeIncidentId || voiceSosBusy.current) return;
+      voiceSosBusy.current = true;
+      voiceTriggerArmed.current = false;
+      await stopVoiceTriggerRecognition().catch(() => undefined);
+      state.setTelemetry({
+        voiceTriggerStatus: 'listening',
+        voiceTriggerTranscript: keyword.replace(/_/g, ' '),
+      });
+      router.push({
+        pathname: '/sos-countdown',
+        params: { source: 'voice', keyword },
+      });
+    },
+    [router],
+  );
+
+  showVoiceCountdownRef.current = showVoiceCountdown;
+
+  const showSafetyCountdown = useCallback(
+    async (source: 'motion' | 'audio' | 'threat', label: string) => {
+      const state = useMonitorStore.getState();
+      if (state.activeIncidentId || voiceSosBusy.current) return;
+      voiceSosBusy.current = true;
+      voiceTriggerArmed.current = false;
+      await stopVoiceTriggerRecognition().catch(() => undefined);
+      router.push({
+        pathname: '/sos-countdown',
+        params: { source, keyword: label },
+      });
+    },
+    [router],
+  );
+
+  showSafetyCountdownRef.current = showSafetyCountdown;
 
   flushVoiceAudioRef.current = async (sampleRate: number) => {
     if (
@@ -599,16 +1128,32 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       const detection = await processVoiceTriggerPcm(pcmBytes, sampleRate);
       if (!detection || !voiceTriggerArmed.current || voiceSosBusy.current) return;
 
-      voiceSosBusy.current = true;
+      if (detection.kind === 'threat' && isThreatPhraseKeyword(detection.keyword)) {
+        const state = useMonitorStore.getState();
+        state.setTelemetry({
+          voiceTriggerStatus: 'listening',
+          voiceTriggerTranscript: getThreatPhrase(detection.keyword).display,
+        });
+        if (state.sessionId) {
+          const recorded = recordThreatLanguageMatch(
+            state.sessionId,
+            detection.keyword,
+          );
+          if (recorded) {
+            await triggerHaptic('warning');
+            await submitWindow(pcmBytes, sampleRate);
+          }
+        }
+        return;
+      }
+
       voiceTriggerArmed.current = false;
       useMonitorStore.getState().setTelemetry({
-        voiceTriggerTranscript: detection.keyword,
+        voiceTriggerTranscript: detection.display,
       });
-      try {
-        await triggerVoiceSosRef.current();
-      } finally {
-        voiceSosBusy.current = false;
-      }
+      await showVoiceCountdownRef.current(
+        detection.keyword as EmergencyVoiceTriggerKeyword,
+      );
     } catch {
       voiceTriggerArmed.current = false;
       useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'error' });
@@ -624,16 +1169,197 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const suspendForEvidence = useCallback(async () => {
-    deactivateSensors();
-  }, [deactivateSensors]);
+  const rearmVoiceTrigger = useCallback(async () => {
+    voiceSosBusy.current = false;
+    useMonitorStore.getState().setTelemetry({ voiceTriggerTranscript: null });
+    if (isPersistentVoiceTriggerAvailable()) {
+      const persistentState = await getPersistentVoiceTriggerState();
+      if (persistentState.enabled) {
+        await rearmPersistentVoiceTrigger();
+        await syncPersistentVoiceTrigger();
+      }
+    }
+    if (!voiceTriggerEnabled.current) return;
+    const state = useMonitorStore.getState();
+    if (
+      appState.current === 'active' &&
+      state.sessionState === 'monitoring' &&
+      !state.activeIncidentId &&
+      sensorSuspensions.current.size === 0
+    ) {
+      startVoiceTrigger();
+    }
+  }, [startVoiceTrigger, syncPersistentVoiceTrigger]);
+
+  const suspendSensorsFor = useCallback(
+    async (reason: 'evidence' | 'siren') => {
+      sensorSuspensions.current.add(reason);
+      deactivateSensors();
+      await syncPersistentVoiceTrigger();
+    },
+    [deactivateSensors, syncPersistentVoiceTrigger],
+  );
+
+  const resumeSensorsAfter = useCallback(
+    async (reason: 'evidence' | 'siren') => {
+      sensorSuspensions.current.delete(reason);
+      const state = useMonitorStore.getState();
+      if (sensorSuspensions.current.size === 0 && state.sessionState === 'monitoring') {
+        await activateSensors();
+      } else {
+        await syncPersistentVoiceTrigger();
+      }
+    },
+    [activateSensors, syncPersistentVoiceTrigger],
+  );
+
+  const suspendForEvidence = useCallback(
+    async () => suspendSensorsFor('evidence'),
+    [suspendSensorsFor],
+  );
 
   const resumeAfterEvidence = useCallback(async () => {
     const state = useMonitorStore.getState();
     state.setActiveIncident(null);
     clearAudioSnapshotBuffer();
-    if (state.sessionState === 'monitoring') await activateSensors();
-  }, [activateSensors, clearAudioSnapshotBuffer]);
+    await rearmVoiceTrigger();
+    await resumeSensorsAfter('evidence');
+  }, [clearAudioSnapshotBuffer, rearmVoiceTrigger, resumeSensorsAfter]);
+
+  const suspendForSiren = useCallback(
+    async () => suspendSensorsFor('siren'),
+    [suspendSensorsFor],
+  );
+
+  const resumeAfterSiren = useCallback(
+    async () => resumeSensorsAfter('siren'),
+    [resumeSensorsAfter],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void readSettings(db)
+      .then(async (settings) => {
+        if (cancelled) return;
+        behaviorBaselineEnabled.current =
+          hasCurrentMonitoringConsent(settings) &&
+          settings.behaviorBaselineEnabled;
+        await refreshBehaviorBaselineStatus();
+      })
+      .catch(() => {
+        if (!cancelled) {
+          behaviorBaselineEnabled.current = false;
+          useMonitorStore.getState().setTelemetry({
+            behaviorBaseline: disabledBehaviorBaselineTelemetry(),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, refreshBehaviorBaselineStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readSettings(db)
+      .then(async (settings) => {
+        if (cancelled) return;
+        if (!hasCurrentMonitoringConsent(settings)) {
+          voiceTriggerEnabled.current = false;
+          useMonitorStore.getState().setTelemetry({
+            voiceTriggerStatus: 'disabled',
+          });
+          return;
+        }
+        voiceTriggerEnabled.current = settings.voiceKeywordEnabled;
+        if (!settings.voiceKeywordEnabled) {
+          useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'disabled' });
+          return;
+        }
+
+        if (process.env.EXPO_OS === 'android') {
+          if (!isPersistentVoiceTriggerAvailable()) {
+            useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'unavailable' });
+            return;
+          }
+          const persistentState = await getPersistentVoiceTriggerState();
+          if (persistentState.configured && !persistentState.enabled) {
+            const nextSettings = { ...settings, voiceKeywordEnabled: false };
+            await writeSettings(db, nextSettings);
+            voiceTriggerEnabled.current = false;
+            useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'disabled' });
+            return;
+          }
+          // Refresh the private model directory on every app-version start.
+          // This migrates an already-enabled listener to newly bundled phrase
+          // definitions without asking the user to toggle protection off/on.
+          useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'checking' });
+          const preparation = await enableVoiceTrigger(true);
+          if (!preparation.ready) {
+            const nextSettings = { ...settings, voiceKeywordEnabled: false };
+            await writeSettings(db, nextSettings);
+            voiceTriggerEnabled.current = false;
+            useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'error' });
+            return;
+          }
+          await syncPersistentVoiceTriggerRef.current();
+          useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'listening' });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          useMonitorStore.getState().setTelemetry({ voiceTriggerStatus: 'error' });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readSettings(db)
+      .then(async (settings) => {
+        if (
+          cancelled ||
+          !settings.onboardingComplete ||
+          !settings.monitoringEnabled ||
+          !hasCurrentMonitoringConsent(settings)
+        ) {
+          return;
+        }
+        const permissions = await getCorePermissionSnapshot();
+        if (!allCorePermissionsGranted(permissions)) {
+          useMonitorStore.getState().setHealth({
+            microphone: permissions.microphone ? 'ready' : 'blocked',
+            motion: permissions.motion ? 'ready' : 'blocked',
+            location:
+              permissions.locationForeground &&
+              permissions.locationPrecise &&
+              permissions.locationBackground
+                ? 'ready'
+                : 'blocked',
+            camera: permissions.camera ? 'ready' : 'blocked',
+          });
+          return;
+        }
+        await enablePersistentProtection();
+        if (cancelled || useMonitorStore.getState().sessionState !== 'idle') return;
+        await startMonitoring();
+      })
+      .catch(() => {
+        if (!cancelled) {
+          useMonitorStore.getState().setHealth({
+            microphone: 'blocked',
+            motion: 'blocked',
+            location: 'blocked',
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, startMonitoring]);
 
   useEffect(
     () => () => {
@@ -645,18 +1371,85 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       appState.current = nextState;
+      const state = useMonitorStore.getState();
+      if (nextState !== 'active') {
+        behaviorDeviation.current = null;
+        previousBehaviorLocation.current = null;
+        stopVoiceTrigger();
+        motionSubscription.current?.remove();
+        motionSubscription.current = null;
+        try {
+          if (audioStream.stream.isStreaming) audioStream.stream.stop();
+        } catch {
+          // The stream may already be released during an app-state transition.
+        }
+        if (isPersistentVoiceTriggerAvailable()) {
+          void setPersistentProtectionActive(
+            state.sessionState === 'monitoring' &&
+              !state.activeIncidentId &&
+              sensorSuspensions.current.size === 0,
+          );
+          if (voiceTriggerEnabled.current) {
+            void syncPersistentVoiceTriggerRef.current();
+          }
+        }
+        return;
+      }
+      if (
+        state.sessionState === 'monitoring' &&
+        !state.activeIncidentId &&
+        sensorSuspensions.current.size === 0
+      ) {
+        void activateSensors();
+      } else {
+        void syncPersistentVoiceTriggerRef.current();
+      }
     });
     return () => subscription.remove();
+  }, [activateSensors, audioStream.stream, stopVoiceTrigger]);
+
+  useEffect(() => {
+    const subscription = addPersistentVoiceTriggerListener(({ keyword }) => {
+      if (!voiceTriggerEnabled.current) return;
+      if (isThreatPhraseKeyword(keyword)) {
+        const state = useMonitorStore.getState();
+        state.setTelemetry({
+          voiceTriggerStatus: 'listening',
+          voiceTriggerTranscript: getThreatPhrase(keyword).display,
+        });
+        if (state.sessionId) {
+          recordThreatLanguageMatch(state.sessionId, keyword);
+        }
+        return;
+      }
+      void showVoiceCountdownRef.current(
+        keyword as EmergencyVoiceTriggerKeyword,
+      );
+    });
+    return () => subscription?.remove();
+  }, []);
+
+  useEffect(() => {
+    const subscription = addPersistentSafetyTriggerListener(({ source, label }) => {
+      void showSafetyCountdownRef.current(source, label);
+    });
+    return () => subscription?.remove();
   }, []);
 
   useEffect(() => {
     void Battery.isLowPowerModeEnabledAsync()
       .then((enabled) => {
         lowPowerMode.current = enabled;
+        DeviceMotion.setUpdateInterval(
+          enabled ? LOW_POWER_MOTION_INTERVAL_MS : ACTIVE_MOTION_INTERVAL_MS,
+        );
       })
       .catch(() => undefined);
     const subscription = Battery.addLowPowerModeListener(({ lowPowerMode: enabled }) => {
       lowPowerMode.current = enabled;
+      DeviceMotion.setUpdateInterval(
+        enabled ? LOW_POWER_MOTION_INTERVAL_MS : ACTIVE_MOTION_INTERVAL_MS,
+      );
     });
     return () => subscription.remove();
   }, []);
@@ -676,6 +1469,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       const state = useMonitorStore.getState();
       if (
         state.sessionState === 'monitoring' &&
+        sensorSuspensions.current.size === 0 &&
         Date.now() - lastAudioAt.current > 2_500 &&
         !inferenceBusy.current &&
         shouldAnalyzeRef.current()
@@ -700,19 +1494,33 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       resumeMonitoring,
       stopMonitoring,
       triggerManualSos,
+      triggerVoiceSos,
+      triggerMotionSos,
+      triggerAudioSos,
+      rearmVoiceTrigger,
+      setBehaviorBaselineEnabled,
       setVoiceTriggerEnabled,
       suspendForEvidence,
       resumeAfterEvidence,
+      suspendForSiren,
+      resumeAfterSiren,
     }),
     [
       pauseMonitoring,
+      rearmVoiceTrigger,
       resumeAfterEvidence,
+      resumeAfterSiren,
       resumeMonitoring,
+      setBehaviorBaselineEnabled,
       setVoiceTriggerEnabled,
       startMonitoring,
       stopMonitoring,
       suspendForEvidence,
+      suspendForSiren,
       triggerManualSos,
+      triggerMotionSos,
+      triggerAudioSos,
+      triggerVoiceSos,
     ],
   );
 

@@ -1,4 +1,7 @@
-from pydantic import BaseModel, ConfigDict, Field, alias_generators
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, alias_generators, field_validator
 
 
 class CamelModel(BaseModel):
@@ -62,3 +65,62 @@ class DataErasureRequest(CamelModel):
 
 class DataErasureResponse(CamelModel):
     erased: int = Field(ge=0)
+
+
+class AnonymousDistressReport(CamelModel):
+    model_config = ConfigDict(
+        alias_generator=alias_generators.to_camel,
+        populate_by_name=True,
+        serialize_by_alias=True,
+        extra="forbid",
+    )
+
+    schema_version: Literal[1]
+    cell_id: str = Field(pattern=r"^r1:\d{1,5}:\d{1,5}$", max_length=18)
+    time_bucket: datetime
+    event_kind: Literal[
+        "manual_sos",
+        "voice_sos",
+        "motion_sos",
+        "audio_sos",
+        "confirmed_distress",
+    ]
+    accuracy_band: Literal["good", "fair"]
+    dedupe_token: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("time_bucket")
+    @classmethod
+    def validate_hour_bucket(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timeBucket must include a timezone")
+        if value.minute or value.second or value.microsecond:
+            raise ValueError("timeBucket must be rounded to the hour")
+        return value
+
+
+class AnonymousReportReceipt(CamelModel):
+    accepted: bool
+
+
+class RiskZone(CamelModel):
+    cell_id: str
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    intensity: float = Field(ge=0, le=1)
+    radius_meters: int = Field(ge=100, le=2_000)
+    risk_band: Literal["emerging", "elevated", "high"]
+
+
+class RiskZonePrivacy(CamelModel):
+    location_precision: str
+    time_precision: str
+    minimum_reports: int = Field(ge=3)
+    exact_counts_exposed: Literal[False] = False
+    raw_locations_stored: Literal[False] = False
+
+
+class RiskZonesResponse(CamelModel):
+    generated_at: datetime
+    window_hours: int
+    zones: list[RiskZone]
+    privacy: RiskZonePrivacy

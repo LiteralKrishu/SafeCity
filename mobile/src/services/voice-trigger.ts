@@ -1,10 +1,18 @@
-import { KWS } from '@siteed/sherpa-onnx.rn';
 import { Asset } from 'expo-asset';
 import { requestRecordingPermissionsAsync } from 'expo-audio';
 import { Directory, File, Paths } from 'expo-file-system';
+import { TurboModuleRegistry } from 'react-native';
+
+import { conditionOutdoorAudio } from '@/inference/audioConditioning';
+import {
+  getThreatPhrase,
+  isThreatPhraseKeyword,
+  THREAT_PHRASES,
+  type ThreatPhraseKeyword,
+} from '@/inference/threatLanguage';
 
 export const VOICE_TRIGGER_SAMPLE_RATE = 16_000;
-export const VOICE_TRIGGER_MODEL_VERSION = 'sherpa-kws-zh-en-3m-int8-2025-12-20-v2';
+export const VOICE_TRIGGER_MODEL_VERSION = 'sherpa-kws-zh-en-3m-int8-2025-12-20-v4';
 
 export type { VoiceTriggerStatus } from '@/types/domain';
 
@@ -14,8 +22,18 @@ export interface VoiceTriggerPreparation {
 }
 
 export interface VoiceTriggerDetection {
-  keyword: 'HELP' | 'BACHAO';
+  display: string;
+  kind: 'emergency' | 'threat';
+  keyword: VoiceTriggerKeyword;
 }
+
+export type EmergencyVoiceTriggerKeyword =
+  | 'HELP'
+  | 'BACHAO'
+  | 'SOS'
+  | 'EMERGENCY'
+  | 'SAVE_ME';
+export type VoiceTriggerKeyword = EmergencyVoiceTriggerKeyword | ThreatPhraseKeyword;
 
 interface BundledModelFile {
   filename: string;
@@ -28,6 +46,16 @@ const DECODER_FILE = 'decoder-epoch-13-avg-2-chunk-16-left-64.onnx';
 const JOINER_FILE = 'joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx';
 const TOKENS_FILE = 'tokens.txt';
 const KEYWORDS_FILE = 'keywords.txt';
+const MISSING_NATIVE_ENGINE_MESSAGE =
+  'This SafeCity installation does not include the offline voice engine. Install the latest app build to enable emergency-word and threat-phrase detection.';
+const SUPPORTED_KEYWORDS = new Set<VoiceTriggerKeyword>([
+  'HELP',
+  'BACHAO',
+  'SOS',
+  'EMERGENCY',
+  'SAVE_ME',
+  ...(Object.keys(THREAT_PHRASES) as ThreatPhraseKeyword[]),
+]);
 const MODEL_FILES: BundledModelFile[] = [
   {
     filename: ENCODER_FILE,
@@ -56,6 +84,35 @@ let initialized = false;
 let listening = false;
 let sessionGeneration = 0;
 let nativeOperationQueue: Promise<void> = Promise.resolve();
+let kwsPromise: Promise<(typeof import('@siteed/sherpa-onnx.rn'))['KWS']> | null = null;
+
+function hasNativeKeywordEngine(): boolean {
+  return isSupportedPlatform() && TurboModuleRegistry.get('SherpaOnnx') !== null;
+}
+
+function loadKeywordEngine(): Promise<(typeof import('@siteed/sherpa-onnx.rn'))['KWS']> {
+  if (!hasNativeKeywordEngine()) {
+    return Promise.reject(new Error(MISSING_NATIVE_ENGINE_MESSAGE));
+  }
+
+  if (!kwsPromise) {
+    kwsPromise = Promise.resolve()
+      .then(() => {
+        const sherpaModule = require('@siteed/sherpa-onnx.rn') as
+          | typeof import('@siteed/sherpa-onnx.rn')
+          | undefined;
+        if (!sherpaModule?.KWS) {
+          throw new Error('The bundled offline voice engine could not be initialized.');
+        }
+        return sherpaModule.KWS;
+      })
+      .catch((error) => {
+        kwsPromise = null;
+        throw error;
+      });
+  }
+  return kwsPromise;
+}
 
 function runNativeOperation<T>(operation: () => Promise<T>): Promise<T> {
   const result = nativeOperationQueue.then(operation, operation);
@@ -87,10 +144,14 @@ async function copyBundledModelFile(
 }
 
 async function prepareBundledModelDirectory(): Promise<Directory> {
-  const directory = new Directory(Paths.cache, MODEL_DIRECTORY);
+  const directory = new Directory(Paths.document, MODEL_DIRECTORY);
   directory.create({ idempotent: true, intermediates: true });
   await Promise.all(MODEL_FILES.map((modelFile) => copyBundledModelFile(directory, modelFile)));
   return directory;
+}
+
+export async function getBundledVoiceTriggerModelDirectoryUri(): Promise<string> {
+  return (await prepareBundledModelDirectory()).uri;
 }
 
 async function initializeVoiceTriggerModel(): Promise<void> {
@@ -101,13 +162,14 @@ async function initializeVoiceTriggerModel(): Promise<void> {
   if (!initializationPromise) {
     initializationPromise = prepareBundledModelDirectory()
       .then(async (directory) => {
-        const validation = await runNativeOperation(() => KWS.validateLibrary());
+        const keywordEngine = await loadKeywordEngine();
+        const validation = await runNativeOperation(() => keywordEngine.validateLibrary());
         if (!validation.loaded) {
           throw new Error(validation.status || 'The offline voice engine did not load.');
         }
 
         const result = await runNativeOperation(() =>
-          KWS.init({
+          keywordEngine.init({
             modelDir: directory.uri,
             modelType: 'zipformer2',
             modelFiles: {
@@ -139,10 +201,17 @@ async function initializeVoiceTriggerModel(): Promise<void> {
 }
 
 export function isVoiceTriggerAvailable(): boolean {
-  return isSupportedPlatform();
+  return hasNativeKeywordEngine();
 }
 
 export async function prepareVoiceTrigger(): Promise<VoiceTriggerPreparation> {
+  if (!hasNativeKeywordEngine()) {
+    return {
+      ready: false,
+      message: MISSING_NATIVE_ENGINE_MESSAGE,
+    };
+  }
+
   const permission = await requestRecordingPermissionsAsync();
   if (!permission.granted) {
     return {
@@ -155,7 +224,7 @@ export async function prepareVoiceTrigger(): Promise<VoiceTriggerPreparation> {
     await initializeVoiceTriggerModel();
     return {
       ready: true,
-      message: 'The bundled offline Help / Bachao model is ready.',
+      message: 'The bundled offline emergency-word and threat-phrase model is ready.',
     };
   } catch (error) {
     return {
@@ -172,7 +241,8 @@ export async function startVoiceTriggerRecognition(): Promise<void> {
   const generation = ++sessionGeneration;
   await initializeVoiceTriggerModel();
   if (generation !== sessionGeneration) return;
-  await runNativeOperation(() => KWS.resetStream());
+  const keywordEngine = await loadKeywordEngine();
+  await runNativeOperation(() => keywordEngine.resetStream());
   if (generation !== sessionGeneration) return;
   listening = true;
 }
@@ -180,14 +250,18 @@ export async function startVoiceTriggerRecognition(): Promise<void> {
 export async function stopVoiceTriggerRecognition(): Promise<void> {
   sessionGeneration += 1;
   listening = false;
-  if (initialized) await runNativeOperation(() => KWS.resetStream());
+  if (initialized) {
+    const keywordEngine = await loadKeywordEngine();
+    await runNativeOperation(() => keywordEngine.resetStream());
+  }
 }
 
 export async function releaseVoiceTriggerRecognition(): Promise<void> {
   sessionGeneration += 1;
   listening = false;
   if (!initialized) return;
-  const result = await runNativeOperation(() => KWS.release());
+  const keywordEngine = await loadKeywordEngine();
+  const result = await runNativeOperation(() => keywordEngine.release());
   if (result.released) {
     initialized = false;
     initializationPromise = null;
@@ -214,17 +288,34 @@ export async function processVoiceTriggerPcm(
   }
 
   const generation = sessionGeneration;
-  const samples = normalizedSamples(pcmBytes);
-  const result = await runNativeOperation(() => KWS.acceptWaveform(sampleRate, samples));
+  const conditioned = conditionOutdoorAudio(pcmBytes, sampleRate);
+  const samples = normalizedSamples(conditioned.pcmBytes);
+  const keywordEngine = await loadKeywordEngine();
+  const result = await runNativeOperation(() => keywordEngine.acceptWaveform(sampleRate, samples));
   if (!result.success) {
     throw new Error(result.error || 'Offline keyword inference failed.');
   }
   if (!listening || generation !== sessionGeneration || !result.detected) return null;
 
-  const keyword = result.keyword.toLocaleUpperCase();
-  if (keyword !== 'HELP' && keyword !== 'BACHAO') return null;
+  const keyword = result.keyword
+    .toLocaleUpperCase()
+    .replace(/[^A-Z]+/g, '_')
+    .replace(/^_+|_+$/g, '') as VoiceTriggerKeyword;
+  if (!SUPPORTED_KEYWORDS.has(keyword)) return null;
+  await runNativeOperation(() => keywordEngine.resetStream());
+  if (isThreatPhraseKeyword(keyword)) {
+    return {
+      display: getThreatPhrase(keyword).display,
+      kind: 'threat',
+      keyword,
+    };
+  }
+
   sessionGeneration += 1;
   listening = false;
-  await runNativeOperation(() => KWS.resetStream());
-  return { keyword };
+  return {
+    display: keyword === 'SAVE_ME' ? 'Save me' : keyword === 'BACHAO' ? 'Bachao' : keyword,
+    kind: 'emergency',
+    keyword,
+  };
 }

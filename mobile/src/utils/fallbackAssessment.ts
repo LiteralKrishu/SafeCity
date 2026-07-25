@@ -1,8 +1,10 @@
+import { scoreCalibratedMotion } from '@/inference/safetyCalibration';
 import type { Assessment, MotionFeatures } from '@/types/domain';
 
 export function localFallbackAssessment(motion: MotionFeatures): Assessment {
-  const severeMotion = motion.impactAfterFreeFall || motion.peakAccelerationG >= 3.2;
-  const concerningMotion = severeMotion || motion.jerkRms >= 12 || motion.rotationRms >= 220;
+  const motionScore = scoreCalibratedMotion(motion).score;
+  const severeMotion = motion.impactAfterFreeFall || motionScore >= 0.86;
+  const concerningMotion = severeMotion || motionScore >= 0.42;
   return {
     assessmentId: `local-${Date.now()}`,
     riskLevel: severeMotion ? 'alert' : concerningMotion ? 'watch' : 'safe',
@@ -16,7 +18,7 @@ export function localFallbackAssessment(motion: MotionFeatures): Assessment {
         : 'No strong local distress pattern detected.',
     factors: severeMotion ? ['Possible fall-impact sequence', 'On-device audio AI unavailable'] : [],
     matchedPatterns: [],
-    modelVersion: 'on-device-motion-fallback-v2',
+    modelVersion: 'on-device-motion-fallback-v3.2',
     latencyMs: 0,
   };
 }

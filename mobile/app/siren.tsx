@@ -7,7 +7,7 @@ import { ActionButton } from '@/components/ActionButton';
 import { Screen } from '@/components/Screen';
 import { useLocalization } from '@/i18n/localization-provider';
 import { useMonitoring } from '@/services/MonitoringProvider';
-import { startSiren, stopSiren } from '@/services/siren';
+import { isSirenStartCancelled, startSiren, stopSiren } from '@/services/siren';
 import { useMonitorStore } from '@/store/monitorStore';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 
@@ -26,7 +26,7 @@ export default function SirenScreen() {
     setActive(false);
     if (resumeMonitoring.current) {
       resumeMonitoring.current = false;
-      await monitoring.resumeMonitoring().catch(() => undefined);
+      await monitoring.resumeAfterSiren().catch(() => undefined);
     }
   };
 
@@ -34,7 +34,7 @@ export default function SirenScreen() {
     () => () => {
       Vibration.cancel();
       stopSiren();
-      if (resumeMonitoring.current) void monitoring.resumeMonitoring();
+      if (resumeMonitoring.current) void monitoring.resumeAfterSiren();
     },
     [monitoring],
   );
@@ -44,15 +44,24 @@ export default function SirenScreen() {
     try {
       if (sessionState === 'monitoring') {
         resumeMonitoring.current = true;
-        await monitoring.pauseMonitoring();
+        await monitoring.suspendForSiren();
       }
       await startSiren();
       Vibration.vibrate([0, 300, 200, 300, 700], true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       setActive(true);
     } catch (error) {
-      resumeMonitoring.current = false;
-      Alert.alert('Could not play siren', error instanceof Error ? error.message : 'Check phone audio settings and try again.');
+      Vibration.cancel();
+      stopSiren();
+      if (resumeMonitoring.current) {
+        resumeMonitoring.current = false;
+        await monitoring.resumeAfterSiren().catch(() => undefined);
+      }
+      if (isSirenStartCancelled(error)) return;
+      Alert.alert(
+        'Could not play siren',
+        'Check your media volume and audio output, then try again. You can still call 112.',
+      );
     } finally {
       setBusy(false);
     }
@@ -97,7 +106,7 @@ export default function SirenScreen() {
       <View style={styles.notice}>
         <Text style={styles.noticeTitle}>Before you start</Text>
         <Text style={styles.noticeBody}>
-          Raise your media volume. Monitoring pauses while the siren plays so the phone does not mistake its own alarm for distress audio, then resumes when you stop it.
+          Raise your media volume. For a more effective alert, connect your phone to a Bluetooth speaker before starting the siren. Monitoring pauses while the siren plays so the phone does not mistake its own alarm for distress audio, then resumes when you stop it.
         </Text>
       </View>
     </Screen>
@@ -107,13 +116,13 @@ export default function SirenScreen() {
 const styles = StyleSheet.create({
   doneButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm },
   doneText: { color: colors.watch, fontWeight: '900' },
-  sirenPanel: { minHeight: 390, borderRadius: radii.lg, borderWidth: 1, borderColor: colors.dangerBorder, backgroundColor: colors.dangerPanel, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  sirenPanel: { minHeight: 390, borderRadius: radii.lg, borderWidth: 1, borderColor: colors.dangerBorder, backgroundColor: '#160D13', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
   sirenPanelActive: { backgroundColor: '#341017', borderColor: colors.danger },
-  sirenRing: { width: 170, height: 170, borderRadius: 85, borderWidth: 3, borderColor: colors.dangerBorder, backgroundColor: colors.dangerSoft, alignItems: 'center', justifyContent: 'center' },
+  sirenRing: { width: 170, height: 170, borderRadius: 85, borderWidth: 3, borderColor: colors.dangerBorder, backgroundColor: '#431C28', alignItems: 'center', justifyContent: 'center' },
   sirenRingActive: { borderColor: colors.danger, backgroundColor: '#8D1C27' },
   sirenIcon: { color: colors.white, fontSize: 48, fontWeight: '900' },
   state: { color: colors.white, fontSize: type.heading, fontWeight: '900', letterSpacing: 1.2, marginTop: spacing.xl },
-  detail: { color: colors.textMuted, fontSize: type.body, lineHeight: 22, textAlign: 'center', marginTop: spacing.sm },
+  detail: { color: '#C4CAD4', fontSize: type.body, lineHeight: 22, textAlign: 'center', marginTop: spacing.sm },
   actions: { gap: spacing.sm, marginTop: spacing.md },
   notice: { borderRadius: radii.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: spacing.md, marginTop: spacing.md },
   noticeTitle: { color: colors.text, fontSize: type.body, fontWeight: '900' },

@@ -187,7 +187,7 @@ export default function MonitorScreen() {
       ? t('home.status.active')
       : sessionState === 'paused'
         ? t('home.status.paused')
-        : t('home.status.start');
+        : t('home.status.checking');
   const protectionColor =
     sessionState === 'monitoring'
       ? colors.safe
@@ -573,8 +573,8 @@ const styles = StyleSheet.create({
     minHeight: 82,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#32658A',
-    backgroundColor: '#10283A',
+    borderColor: colors.watchBorder,
+    backgroundColor: colors.watchSoft,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
@@ -582,9 +582,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   navigatorBannerIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: colors.watch, alignItems: 'center', justifyContent: 'center' },
-  navigatorBannerIconText: { color: colors.background, fontSize: 25, fontWeight: '900' },
+  navigatorBannerIconText: { color: colors.black, fontSize: 25, fontWeight: '900' },
   escapeBannerIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: colors.safe, alignItems: 'center', justifyContent: 'center' },
-  escapeBannerIconText: { color: colors.background, fontSize: 24, fontWeight: '900' },
+  escapeBannerIconText: { color: colors.black, fontSize: 24, fontWeight: '900' },
   escapeBannerCopy: { flex: 1 },
   escapeBannerTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
   escapeBannerDetail: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: 3 },

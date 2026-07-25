@@ -1,8 +1,10 @@
 import type { LanguagePreference } from '@/i18n/types';
+import type { BehaviorBaselineTelemetry } from '@/inference/behaviorBaseline';
 
 export type RiskLevel = 'safe' | 'watch' | 'alert' | 'sos_pending' | 'sos';
 export type SessionState = 'idle' | 'monitoring' | 'paused';
 export type HealthState = 'ready' | 'degraded' | 'blocked' | 'offline' | 'checking';
+export type InferenceModelPreference = 'auto' | 'lite' | 'yamnet';
 export type VoiceTriggerStatus =
   | 'disabled'
   | 'checking'
@@ -71,13 +73,18 @@ export interface MotionFeatures {
   peakAccelerationG: number;
   jerkRms: number;
   rotationRms: number;
+  peakRotationDps: number;
+  angularTravelDegrees: number;
   freeFallObserved: boolean;
+  freeFallDurationMs: number;
   impactAfterFreeFall: boolean;
+  impactDelayMs: number | null;
   sampleCount: number;
 }
 
 export interface AppSettings {
   onboardingComplete: boolean;
+  monitoringEnabled: boolean;
   consentVersion: string | null;
   consentGrantedAt: string | null;
   privacyNoticeVersion: string | null;
@@ -88,6 +95,12 @@ export interface AppSettings {
   discreetMode: boolean;
   backgroundLocation: boolean;
   voiceKeywordEnabled: boolean;
+  anonymousRiskSharingEnabled: boolean;
+  anonymousRiskConsentGrantedAt: string | null;
+  behaviorBaselineEnabled: boolean;
+  inferenceModel: InferenceModelPreference;
   language: LanguagePreference;
   appearance: 'system' | 'dark' | 'light';
 }
+
+export type { BehaviorBaselineTelemetry };

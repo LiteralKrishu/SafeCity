@@ -23,6 +23,17 @@ export interface SafetyRadarData {
   };
 }
 
+export interface RouteCoordinate {
+  latitude: number;
+  longitude: number;
+}
+
+export interface WalkingRoute {
+  coordinates: RouteCoordinate[];
+  distanceMeters: number;
+  durationSeconds: number;
+}
+
 interface OverpassElement {
   type: 'node' | 'way' | 'relation';
   id: number;
@@ -36,8 +47,32 @@ interface OverpassResponse {
   elements?: OverpassElement[];
 }
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+interface WalkingRouteResponse {
+  code?: string;
+  message?: string;
+  routes?: Array<{
+    distance?: number;
+    duration?: number;
+    geometry?: {
+      type?: string;
+      coordinates?: number[][];
+    };
+  }>;
+}
+
+const OVERPASS_ENDPOINTS = [
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+] as const;
+const WALKING_ROUTE_ENDPOINT = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving';
 const SEARCH_RADIUS_METERS = 3_000;
+const MAX_HAVENS_PER_CATEGORY = 8;
+const safeHavenCategories: SafeHavenCategory[] = [
+  'police',
+  'hospital',
+  'metro',
+  'pharmacy',
+];
 const baseScore: Record<SafeHavenCategory, number> = {
   police: 0.97,
   hospital: 0.9,
@@ -122,28 +157,136 @@ export function formatDistance(meters: number): string {
   return `${(meters / 1_000).toFixed(meters < 10_000 ? 1 : 0)} km`;
 }
 
+export function formatWalkingDuration(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
+}
+
+export function nearestSafeHavens(
+  pins: SafeHavenPin[],
+  category?: SafeHavenCategory,
+  limit?: number,
+): SafeHavenPin[] {
+  const matchingPins = category
+    ? pins.filter((pin) => pin.category === category)
+    : pins;
+  const sortedPins = [...matchingPins].sort(
+    (left, right) =>
+      left.distanceMeters - right.distanceMeters ||
+      right.corridorScore - left.corridorScore ||
+      left.name.localeCompare(right.name),
+  );
+  return limit === undefined ? sortedPins : sortedPins.slice(0, limit);
+}
+
+export function retainNearestHavensByCategory(
+  pins: SafeHavenPin[],
+  limitPerCategory = MAX_HAVENS_PER_CATEGORY,
+): SafeHavenPin[] {
+  return nearestSafeHavens(
+    safeHavenCategories.flatMap((category) =>
+      nearestSafeHavens(pins, category, limitPerCategory),
+    ),
+  );
+}
+
+export async function fetchWalkingRoute(
+  startLat: number,
+  startLng: number,
+  destinationLat: number,
+  destinationLng: number,
+): Promise<WalkingRoute> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const coordinates = `${startLng},${startLat};${destinationLng},${destinationLat}`;
+
+  try {
+    // This host is backed by a foot-specific graph even though OSRM keeps "driving" in the URL slot.
+    const response = await fetch(
+      `${WALKING_ROUTE_ENDPOINT}/${coordinates}?overview=simplified&geometries=geojson&steps=false`,
+      {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Walking-route service returned ${response.status}.`);
+    }
+
+    const payload = (await response.json()) as WalkingRouteResponse;
+    const route = payload.routes?.[0];
+    const routeCoordinates = route?.geometry?.coordinates
+      ?.filter(
+        (coordinate) =>
+          coordinate.length >= 2 &&
+          Number.isFinite(coordinate[0]) &&
+          Number.isFinite(coordinate[1]),
+      )
+      .map(([longitude, latitude]) => ({ latitude: latitude!, longitude: longitude! }));
+
+    if (
+      payload.code !== 'Ok' ||
+      route?.geometry?.type !== 'LineString' ||
+      !routeCoordinates ||
+      routeCoordinates.length < 2 ||
+      route.distance === undefined ||
+      route.duration === undefined
+    ) {
+      throw new Error(payload.message || 'No walking route was found for this destination.');
+    }
+
+    return {
+      coordinates: routeCoordinates,
+      distanceMeters: route.distance,
+      durationSeconds: route.duration,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchNearbySafetyRadar(
   centerLat: number,
   centerLng: number,
   currentHour = new Date().getHours(),
 ): Promise<SafetyRadarData> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  let response: Response;
-  try {
-    response = await fetch(OVERPASS_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: `data=${encodeURIComponent(
-        makeOverpassQuery(centerLat, centerLng, SEARCH_RADIUS_METERS),
-      )}`,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
+  const query = makeOverpassQuery(centerLat, centerLng, SEARCH_RADIUS_METERS);
+  let response: Response | null = null;
+  let lastError: unknown = null;
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const candidate = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'User-Agent': 'SafeCity/2.0 (mobile safety navigator)',
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
+      });
+      if (candidate.ok) {
+        response = candidate;
+        break;
+      }
+      lastError = new Error(`Nearby-place service returned ${candidate.status}.`);
+    } catch (error) {
+      lastError = error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  if (!response.ok) {
-    throw new Error(`Nearby-place service returned ${response.status}.`);
+
+  if (!response) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Nearby-place services are temporarily unavailable.');
   }
 
   const payload = (await response.json()) as OverpassResponse;
@@ -211,13 +354,9 @@ export async function fetchNearbySafetyRadar(
   }
 
   return {
-    safeHavens: pins
-      .sort(
-        (left, right) =>
-          right.corridorScore - left.corridorScore ||
-          left.distanceMeters - right.distanceMeters,
-      )
-      .slice(0, 12),
+    // A dense service type (for example, hospitals) must not crowd every
+    // police, transit, or pharmacy result out of the nearby-place response.
+    safeHavens: retainNearestHavensByCategory(pins),
     context: {
       mappedLitPathSegments: litPathCenters.length,
       emergencyPhones,

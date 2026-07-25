@@ -1,7 +1,7 @@
 # SafeCity Privacy Notice
 
-**Version:** 2026-07-23-v3
-**Effective date:** 23 July 2026
+**Version:** 2026-07-25-v4
+**Effective date:** 25 July 2026
 **Status:** Production template — operator details must be completed before release
 
 > This notice is designed for the SafeCity architecture in this repository and for readiness under India’s Digital Personal Data Protection Act, 2023 (“DPDP Act”) and Digital Personal Data Protection Rules, 2025 (“DPDP Rules”). It is not a legal opinion or a guarantee of compliance. The deploying entity must obtain advice from qualified Indian counsel, complete every bracketed field, validate the actual deployment, and maintain the operational controls described here.
@@ -30,10 +30,12 @@ This notice applies to the SafeCity mobile app and personal data processed for S
 | Emergency-contact name and phone number | Prepare an SOS message to people chosen by the user | SQLCipher-encrypted database on the device | Until removed, consent is withdrawn or app data is erased |
 | Monitoring-session identifier | Keep local assessment windows and incident history separate | SQLCipher-encrypted database and volatile memory on the device | Until app-data erasure; volatile fusion state expires after one hour or session stop |
 | Approximately one second of microphone PCM per inference window and a rolling 15-second tail | Detect possible distress and preserve a pre-alert snapshot only after a confirmed SOS | Volatile device memory and the model bundled in the APK; never sent to a laptop, server or cloud | Assessment windows are discarded; the RAM tail is discarded unless encrypted as SOS evidence |
-| Optional “Help” / “Bachao” keyword detection | Allow hands-free SOS while monitoring | SafeCity’s bundled quantized keyword model consumes the existing 16 kHz in-memory monitoring stream; no operating-system speech service, account, language-pack download or network recognition is used | The detected keyword label is transient and is not stored in incident history |
+| Optional emergency-word and threat-phrase detection | Allow hands-free SOS and locally check a limited catalog of coercive or violent phrases in English, Hindi and Bengali | SafeCity’s bundled quantized keyword model consumes the existing 16 kHz in-memory monitoring stream; it is not general transcription and uses no operating-system speech service, account, language-pack download or network recognition. A threat phrase requires repetition plus independent distress audio or motion before SOS | Ordinary phrase labels are transient. Only a confirmed incident may retain the human-readable phrase category as an incident factor |
 | Motion features, including acceleration, jerk, rotation, free-fall and impact | Detect fall or struggle patterns and reduce false alarms | Calculated and fused in volatile memory on the device | Ordinary windows are discarded; incident factors follow incident retention |
+| Optional adaptive behavior baseline | Learn broad routine patterns and use unusual movement, travel speed or an unfamiliar coarse area only as supporting safety evidence | Once per minute during active monitoring, the phone aggregates weekday/weekend, a four-hour time block, a zoom-16 coarse location cell, motion intensity and accuracy-adjusted travel speed in SQLCipher-encrypted storage. It does not store a breadcrumb route or raw sensor history, and a deviation cannot independently start SOS | At most 256 aggregate profiles and 35 observed-day markers; deleted immediately when the feature is disabled, its baseline is cleared, consent is withdrawn or app data is erased |
 | Hour of day and app foreground/background state | Bounded assessment context that cannot create a threat by itself | Volatile device memory only | Assessment attempt only |
-| Latest available coordinates and accuracy | Attach location to an incident; retrieve nearby mapped facilities/lighting only when requested | Encrypted device database and, after the user requests real nearby places, OpenStreetMap Overpass; excluded from model inference | Overwritten by newer location and removed with app data; nearby-place responses are screen-only |
+| Latest available coordinates and accuracy | Attach location to an incident; retrieve nearby mapped facilities/lighting only when requested; and, if adaptive behavior detection is enabled, derive a coarse on-device routine cell and accuracy-adjusted speed | Encrypted device database and, after the user requests real nearby places, OpenStreetMap Overpass. The adaptive baseline receives only the derived coarse cell and speed | Overwritten by newer location and removed with app data; nearby-place responses are screen-only; aggregate baseline retention is described above |
+| Optional coarse SOS risk contribution | Build anonymous community risk zones after separate opt-in | The phone converts GPS to an approximately 500-metre cell before transmission. The aggregation service receives the cell, hourly bucket, trigger category and a rotating cell/day deduplication token; never exact GPS, evidence, contacts or a stable device ID | Encrypted retry queue: up to 30 days; accepted aggregate input: up to 30 days |
 | Monitoring-session status and timestamps | Operate start, pause, resume and stop controls | Encrypted device database | Until app-data erasure |
 | Incident metadata, risk result, factors, model version, location and feedback | Display local history, explain the alert, support safety review and deletion | Encrypted device database | User-selected 1–90 days; default 30 days; earlier deletion available |
 | Latest 15-second pre-alert WAV, one rear photo, one front photo and 15 seconds of post-SOS audio | Preserve user-authorised incident evidence after SOS confirmation | AES-GCM encrypted in app-private device storage | Same period as the incident; earlier deletion available |
@@ -44,7 +46,7 @@ SafeCity does not collect a contact list, advertising identifier, account passwo
 
 ## 4. Specified purposes and legal basis
 
-SafeCity processes monitoring audio, motion, location, post-SOS evidence and associated identifiers only after free, specific, informed, unconditional and unambiguous consent through clear affirmative actions. Operating-system permissions are separate controls. The user also decides when each monitoring session begins and ends.
+SafeCity processes monitoring audio, motion, location, the optional adaptive behavior baseline, post-SOS evidence and associated identifiers only after free, specific, informed, unconditional and unambiguous consent through clear affirmative actions. Operating-system permissions are separate controls. The user also decides when each monitoring session begins and ends. Anonymous community risk reporting is off by default and requires a separate confirmation in Settings.
 
 Emergency-contact information is voluntarily provided for the specific purpose of preparing an SOS message. The user must have authority to provide that information and should inform the contact. The app does not silently send a message; the operating system requires the user to press **Send**.
 
@@ -58,9 +60,10 @@ Personal data may be handled by:
 2. **SMS and telecom providers and chosen recipients.** They receive message content and any included coordinate only after the user presses **Send**.
 3. **A mapping provider.** It receives coordinates only if the user chooses to open a map link.
 4. **OpenStreetMap Overpass.** It receives current coordinates only if the user chooses to load real nearby place and lighting records in Safety Navigator.
-5. **Authorities or other recipients required by law.** The operator may disclose data where legally required and will document the legal basis.
+5. **SafeCity anonymous risk aggregation service.** If separately enabled, it receives only coarse, hourly, deduplicated SOS contributions and returns zones only after a minimum crowd threshold. It does not receive exact GPS, evidence, contacts or a stable installation identifier.
+6. **Authorities or other recipients required by law.** The operator may disclose data where legally required and will document the legal basis.
 
-No cloud analytics, advertising SDK or SafeCity-hosted evidence upload exists in this repository.
+No cloud analytics, advertising SDK or SafeCity-hosted evidence upload exists in this repository. The optional risk aggregation service stores only the limited coarse report described above.
 
 ## 6. Cross-border processing
 
@@ -69,8 +72,10 @@ The supported SafeCity inference path stays inside the user’s phone. Operating
 ## 7. Retention and erasure
 
 - Raw monitoring windows and ordinary inference results are held only in volatile device memory. The rolling 15-second tail is discarded when monitoring stops unless a confirmed SOS encrypts it as evidence.
+- The optional adaptive behavior baseline retains only bounded aggregate profiles and day markers on the encrypted device database. Disabling the feature or choosing **Clear learned baseline** deletes them immediately.
 - Incidents and encrypted evidence follow the retention period selected in Settings (1–90 days, default 30) and can be deleted individually at any time.
 - Contacts and consent records remain until removed, consent is withdrawn or app data is erased.
+- Unsent anonymous risk reports are deleted after 30 days or immediately when the feature is disabled. Accepted coarse reports are retained by the aggregation service for no more than 30 days. Because the service deliberately does not collect a stable installation identifier, it cannot locate a particular installation’s already accepted contribution for individual deletion.
 - Data may be retained longer only where a law requires it. The operator must document that law and segregate restricted records.
 
 ## 8. Security safeguards
@@ -83,8 +88,10 @@ The repository implements:
 - app-private file storage and deletion of temporary plaintext capture files;
 - in-memory monitoring audio processing with no inference network request or monitoring cache file;
 - an APK-bundled model and on-device fusion rules, so loss of internet connectivity does not expose or interrupt inference;
+- coarse-cell conversion before adaptive routine storage, GPS-accuracy filtering, bounded aggregate profiles and no breadcrumb-route retention;
 - configurable short retention and individual/bulk erasure controls;
 - no analytics, advertising or public-cloud inference integration.
+- client-side location coarsening, rotating cell/day deduplication tokens, a server-side minimum crowd threshold, bounded map queries, no access logging in the supplied container and no exact count publication for community risk zones.
 
 A production deployment still requires secure release signing, dependency and model provenance review, tested key lifecycle controls, vulnerability management, incident response and periodic mobile security testing. A locally processed design reduces disclosure risk but does not eliminate device compromise, malicious builds, operating-system access or physical-access risk.
 
@@ -117,7 +124,7 @@ Do not send unencrypted incident evidence through ordinary email. The operator m
 
 ## 11. Withdrawal of consent
 
-Use **Settings → Legal and your data → Withdraw consent and erase data**. SafeCity will stop monitoring, delete contacts, sessions, incidents, locations, consent records and encrypted evidence from this installation, clear any legacy installation identifier and return to onboarding. Withdrawal does not affect processing that was lawful before withdrawal or processing required by law.
+Use **Settings → Legal and your data → Withdraw consent and erase data**. SafeCity will stop monitoring, delete contacts, sessions, incidents, locations, queued anonymous reports, rotating anonymous secret, consent records and encrypted evidence from this installation, clear any legacy installation identifier and return to onboarding. Withdrawal does not affect processing that was lawful before withdrawal or processing required by law.
 
 ## 12. Children
 

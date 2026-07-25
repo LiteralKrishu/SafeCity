@@ -2,6 +2,8 @@ import { create } from 'zustand';
 
 import type {
   Assessment,
+  BehaviorBaselineTelemetry,
+  InferenceModelPreference,
   RiskLevel,
   SensorHealth,
   SessionState,
@@ -14,20 +16,35 @@ interface MonitorStore {
   riskLevel: RiskLevel;
   score: number;
   latestAssessment: Assessment | null;
+  inferenceModelPreference: InferenceModelPreference;
   health: SensorHealth;
   activeIncidentId: string | null;
   telemetry: {
     audioLevel: number;
+    audioDbFs: number;
+    audioSpectrum: number[];
+    dominantFrequencyHz: number | null;
     audioUpdatedAt: number | null;
-    motion: { x: number; y: number; z: number; magnitudeG: number } | null;
+    motion: {
+      x: number;
+      y: number;
+      z: number;
+      magnitudeG: number;
+      rotationXDegPerSecond: number;
+      rotationYDegPerSecond: number;
+      rotationZDegPerSecond: number;
+      rotationMagnitudeDegPerSecond: number;
+    } | null;
     motionUpdatedAt: number | null;
     location: { latitude: number; longitude: number; accuracy: number | null } | null;
     locationUpdatedAt: number | null;
     voiceTriggerStatus: VoiceTriggerStatus;
     voiceTriggerTranscript: string | null;
+    behaviorBaseline: BehaviorBaselineTelemetry;
   };
   setSession: (state: SessionState, id?: string | null) => void;
   setAssessment: (assessment: Assessment) => void;
+  setInferenceModelPreference: (preference: InferenceModelPreference) => void;
   setHealth: (health: Partial<SensorHealth>) => void;
   setActiveIncident: (id: string | null) => void;
   setTelemetry: (telemetry: Partial<MonitorStore['telemetry']>) => void;
@@ -48,10 +65,14 @@ export const useMonitorStore = create<MonitorStore>((set) => ({
   riskLevel: 'safe',
   score: 0,
   latestAssessment: null,
+  inferenceModelPreference: 'auto',
   health: initialHealth,
   activeIncidentId: null,
   telemetry: {
     audioLevel: 0,
+    audioDbFs: -96,
+    audioSpectrum: Array.from({ length: 36 }, () => 0),
+    dominantFrequencyHz: null,
     audioUpdatedAt: null,
     motion: null,
     motionUpdatedAt: null,
@@ -59,6 +80,19 @@ export const useMonitorStore = create<MonitorStore>((set) => ({
     locationUpdatedAt: null,
     voiceTriggerStatus: 'disabled',
     voiceTriggerTranscript: null,
+    behaviorBaseline: {
+      enabled: false,
+      phase: 'off',
+      ready: false,
+      sampleCount: 0,
+      dayCount: 0,
+      profileCount: 0,
+      locationProfileCount: 0,
+      progress: 0,
+      lastLearnedAt: null,
+      deviationScore: 0,
+      factors: [],
+    },
   },
   setSession: (sessionState, sessionId) => set({ sessionState, sessionId: sessionId ?? null }),
   setAssessment: (assessment) =>
@@ -67,6 +101,7 @@ export const useMonitorStore = create<MonitorStore>((set) => ({
       riskLevel: assessment.riskLevel,
       score: assessment.fusedScore,
     }),
+  setInferenceModelPreference: (inferenceModelPreference) => set({ inferenceModelPreference }),
   setHealth: (health) => set((state) => ({ health: { ...state.health, ...health } })),
   setActiveIncident: (activeIncidentId) => set({ activeIncidentId }),
   setTelemetry: (telemetry) =>

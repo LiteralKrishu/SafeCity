@@ -1,7 +1,6 @@
 import * as Linking from 'expo-linking';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { File } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -151,17 +150,25 @@ export default function IncidentDetailScreen() {
         {
           text: 'Export encrypted file',
           onPress: () => {
-            void Sharing.isAvailableAsync().then(async (available) => {
-              if (!available) {
-                Alert.alert('Sharing unavailable', 'This phone cannot open a file sharing sheet.');
-                return;
-              }
-              await Sharing.shareAsync(uri, {
-                dialogTitle,
-                mimeType: 'application/octet-stream',
-                UTI: 'public.data',
+            void Promise.resolve()
+              .then(async () => {
+                const Sharing = require('expo-sharing') as typeof import('expo-sharing');
+                if (!(await Sharing.isAvailableAsync())) {
+                  Alert.alert('Sharing unavailable', 'This phone cannot open a file sharing sheet.');
+                  return;
+                }
+                await Sharing.shareAsync(uri, {
+                  dialogTitle,
+                  mimeType: 'application/octet-stream',
+                  UTI: 'public.data',
+                });
+              })
+              .catch(() => {
+                Alert.alert(
+                  'Sharing unavailable',
+                  'Install a current SafeCity build to export encrypted evidence.',
+                );
               });
-            });
           },
         },
       ],

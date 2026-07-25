@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.safecity'
+version = '1.0.0'
+
+android {
+  namespace "com.safecity.voicetrigger"
+
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  implementation project(':siteed_sherpa-onnx.rn')
+  implementation 'androidx.core:core-ktx:1.17.0'
+}
