@@ -1,10 +1,12 @@
 # SafeCity Terms and Conditions
 
-**Version:** 2026-07-23-v3
-**Effective date:** 23 July 2026
-**Status:** Production template — operator details and legal review required
+**Version:** 2026-07-25-v4
+**Effective date:** 25 July 2026
+**Status:** Production template — operator details, implementation remediation, and legal review required
 
 > These Terms are a deployment template, not legal advice. The deploying entity must complete every bracketed field and obtain review from qualified Indian counsel, including review under the Indian Contract Act, 1872, Consumer Protection Act, 2019, DPDP Act and any health, emergency, telecom or state law applicable to the final service.
+
+> Current-source variance: onboarding presently requires every listed permission and automatically enables monitoring, background location, voice keywords, and the behavior baseline after bundled consent. Safety Navigator also sends exact coordinates to public map services before a separate load action. These behaviors must be remediated or accurately reviewed and disclosed before this template can describe a release.
 
 ## 1. Agreement and operator
 
@@ -61,9 +63,11 @@ You must not use SafeCity to surveil another person, record or track unlawfully,
 
 ## 6. Permissions, location, evidence and communications
 
-Operating-system permissions are optional, but denied access degrades features. “Allow all the time” location access is preferable for active monitoring coverage, but it is not mandatory for manual SOS.
+The intended production design should request permissions by feature and degrade when optional access is denied. The current source instead blocks onboarding unless camera, microphone, motion, precise foreground location, background location, notifications, and full-screen alert access are all available. This is a known release blocker, not an endorsed production behavior.
 
-Camera evidence can normally be captured only while SafeCity is visible. Evidence remains encrypted in app-private storage unless you deliberately share or export it. Keyword accuracy, power use, and background continuity vary by device even though inference is bundled and offline. An SMS, map action, or user-requested OpenStreetMap nearby-place lookup invokes a third-party service governed by that provider’s terms. Carrier or data charges may apply. SafeCity does not claim delivery merely because a composer or map opened.
+Camera evidence can normally be captured only while SafeCity is visible. Evidence remains encrypted in app-private storage unless you deliberately share or export it. Keyword accuracy, power use, and background continuity vary by device even though inference is bundled and offline. Android may hand monitoring to a native foreground service; the current iOS build stops the React audio/motion pipeline when the app is not active.
+
+Opening Safety Navigator currently sends exact current coordinates to a public Overpass endpoint, selecting a destination sends exact origin/destination coordinates to an OpenStreetMap routing endpoint, and rendering the map requests CARTO tiles. An SMS or external map action invokes other third-party services. Each provider applies its own terms and privacy practices; carrier or data charges may apply. SafeCity does not claim delivery merely because a composer or map opened.
 
 ## 7. Privacy
 

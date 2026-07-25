@@ -18,7 +18,7 @@ Official sources:
 
 | Control | Implementation |
 |---|---|
-| Purpose-limited consent | Monitoring and SOS-evidence statements are separate affirmative checkboxes; consent is recorded by version and timestamp |
+| Versioned consent record | Monitoring and SOS-evidence statements use affirmative checkboxes and the result is recorded by version and timestamp. Continuous voice processing and the adaptive baseline are currently bundled in one statement and automatically enabled; granular purpose choice remains a release blocker |
 | Notice before consent | In-app itemised Privacy Notice and Terms links are available inside the consent confirmation |
 | Adult-only gate | User must confirm age 18+; no claim of a child-capable flow |
 | Easy withdrawal | Settings provides a destructive confirmation that stops monitoring and erases this installation’s local personal data |
@@ -29,6 +29,8 @@ Official sources:
 | Local inference | Bundled YAMNet Lite, motion features, pattern matching and temporal fusion execute on the phone without a laptop or network request |
 | Sharing control | No automatic message transmission; user must press Send in the system composer |
 | No advertising | No advertising SDK, sale or targeted advertising in the repository |
+
+The table records technical controls, not a compliance conclusion. The current all-permission onboarding gate, bundled optional-feature consent, and Safety Navigator disclosure mismatch are detailed in [AUDIT_REPORT.md](AUDIT_REPORT.md) and must be corrected before relying on the consent/minimisation claims.
 
 ## Release blockers
 
@@ -49,6 +51,9 @@ The following must be completed before any claim of production compliance:
 13. **Store/platform disclosures.** Align Google Play Data safety, Apple privacy labels, permission copy and marketing claims with the final notice.
 14. **Retention conflicts.** Obtain advice on the DPDP Rules’ security-log retention requirements before the relevant provisions commence and reconcile them with minimisation. Ordinary safety assessments are not designated as security logs in this design.
 15. **Evidence legality.** Review consent and recording laws for photographs, microphone capture, bystanders, domestic spaces, workplaces and each target state.
+16. **Granular choice.** Replace the all-permission gate and bundled automatic enablement with purpose-specific, optional choices and tested withdrawal.
+17. **Map recipients.** Correct the in-app and template notices before Safety Navigator sends exact coordinates; cover Overpass, routing, CARTO tiles, network metadata, provider terms and cross-border handling.
+18. **Platform claims.** State that the current iOS implementation stops React audio/motion outside the active app and validate every Android background/reboot/force-stop limitation.
 
 ## Configuration required
 
@@ -63,7 +68,7 @@ EXPO_PUBLIC_GRIEVANCE_EMAIL
 EXPO_PUBLIC_GOVERNING_COURTS
 ```
 
-The app visibly labels the legal configuration as incomplete while any value is missing. That warning is deliberate and must not be removed merely to pass release review.
+The app visibly labels the legal configuration as incomplete while any value is missing. That warning is deliberate and must not be removed merely to pass release review. The repository does not yet fail a production build on placeholders; add a release preflight.
 
 ## Change-control rule
 

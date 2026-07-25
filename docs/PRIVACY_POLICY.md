@@ -1,10 +1,12 @@
 # SafeCity Privacy Notice
 
-**Version:** 2026-07-25-v4
+**Version:** 2026-07-25-v5
 **Effective date:** 25 July 2026
-**Status:** Production template — operator details must be completed before release
+**Status:** Production template — operator details, implementation remediation, and legal review required
 
 > This notice is designed for the SafeCity architecture in this repository and for readiness under India’s Digital Personal Data Protection Act, 2023 (“DPDP Act”) and Digital Personal Data Protection Rules, 2025 (“DPDP Rules”). It is not a legal opinion or a guarantee of compliance. The deploying entity must obtain advice from qualified Indian counsel, complete every bracketed field, validate the actual deployment, and maintain the operational controls described here.
+
+> Current-source variance: the app currently bundles several optional processing choices, enables them together at onboarding, requires every listed permission, and sends exact Safety Navigator coordinates before the separate choice described by the in-app notice. This template records the actual map recipients below but does not cure the consent/UX defect. Remediate [SC-H01–SC-H03](AUDIT_REPORT.md) and version the in-app notice/consent before release.
 
 ## 1. Data Fiduciary and contact details
 
@@ -34,7 +36,7 @@ This notice applies to the SafeCity mobile app and personal data processed for S
 | Motion features, including acceleration, jerk, rotation, free-fall and impact | Detect fall or struggle patterns and reduce false alarms | Calculated and fused in volatile memory on the device | Ordinary windows are discarded; incident factors follow incident retention |
 | Optional adaptive behavior baseline | Learn broad routine patterns and use unusual movement, travel speed or an unfamiliar coarse area only as supporting safety evidence | Once per minute during active monitoring, the phone aggregates weekday/weekend, a four-hour time block, a zoom-16 coarse location cell, motion intensity and accuracy-adjusted travel speed in SQLCipher-encrypted storage. It does not store a breadcrumb route or raw sensor history, and a deviation cannot independently start SOS | At most 256 aggregate profiles and 35 observed-day markers; deleted immediately when the feature is disabled, its baseline is cleared, consent is withdrawn or app data is erased |
 | Hour of day and app foreground/background state | Bounded assessment context that cannot create a threat by itself | Volatile device memory only | Assessment attempt only |
-| Latest available coordinates and accuracy | Attach location to an incident; retrieve nearby mapped facilities/lighting only when requested; and, if adaptive behavior detection is enabled, derive a coarse on-device routine cell and accuracy-adjusted speed | Encrypted device database and, after the user requests real nearby places, OpenStreetMap Overpass. The adaptive baseline receives only the derived coarse cell and speed | Overwritten by newer location and removed with app data; nearby-place responses are screen-only; aggregate baseline retention is described above |
+| Latest available coordinates and accuracy | Attach location to an incident; retrieve nearby mapped facilities/lighting; request a selected walking route; render the viewed map; and, if adaptive behavior detection is enabled, derive a coarse on-device routine cell and accuracy-adjusted speed | Encrypted device database; exact coordinates are sent to an Overpass endpoint automatically when Safety Navigator opens and to `routing.openstreetmap.de` when a destination is selected. CARTO receives tile requests for the viewed area. The adaptive baseline receives only the derived coarse cell and speed | Overwritten by newer location and removed with app data; place/route responses are screen-only; external providers apply their own retention; aggregate baseline retention is described above |
 | Optional coarse SOS risk contribution | Build anonymous community risk zones after separate opt-in | The phone converts GPS to an approximately 500-metre cell before transmission. The aggregation service receives the cell, hourly bucket, trigger category and a rotating cell/day deduplication token; never exact GPS, evidence, contacts or a stable device ID | Encrypted retry queue: up to 30 days; accepted aggregate input: up to 30 days |
 | Monitoring-session status and timestamps | Operate start, pause, resume and stop controls | Encrypted device database | Until app-data erasure |
 | Incident metadata, risk result, factors, model version, location and feedback | Display local history, explain the alert, support safety review and deletion | Encrypted device database | User-selected 1–90 days; default 30 days; earlier deletion available |
@@ -46,7 +48,9 @@ SafeCity does not collect a contact list, advertising identifier, account passwo
 
 ## 4. Specified purposes and legal basis
 
-SafeCity processes monitoring audio, motion, location, the optional adaptive behavior baseline, post-SOS evidence and associated identifiers only after free, specific, informed, unconditional and unambiguous consent through clear affirmative actions. Operating-system permissions are separate controls. The user also decides when each monitoring session begins and ends. Anonymous community risk reporting is off by default and requires a separate confirmation in Settings.
+The intended production basis for monitoring audio, motion, location, optional behavior baselining, post-SOS evidence, and associated identifiers is free, specific, informed, unconditional, and unambiguous consent through clear affirmative actions. Operating-system permissions are separate controls. Anonymous community risk reporting is off by default and requires a separate confirmation in Settings.
+
+The current source does not yet fully meet that intended design: onboarding requires all permissions and one consent statement combines foreground monitoring, continuous voice processing, and behavior baselining; completion then enables voice processing, behavior baselining, background location, and monitoring together. The production operator must split those purposes, default optional processing off, and correct the map disclosure before relying on this section.
 
 Emergency-contact information is voluntarily provided for the specific purpose of preparing an SOS message. The user must have authority to provide that information and should inform the contact. The app does not silently send a message; the operating system requires the user to press **Send**.
 
@@ -58,10 +62,12 @@ Personal data may be handled by:
 
 1. **The mobile operating-system provider.** It supplies permissions, protected key storage, notifications, camera, microphone, motion and location functions under its own terms.
 2. **SMS and telecom providers and chosen recipients.** They receive message content and any included coordinate only after the user presses **Send**.
-3. **A mapping provider.** It receives coordinates only if the user chooses to open a map link.
-4. **OpenStreetMap Overpass.** It receives current coordinates only if the user chooses to load real nearby place and lighting records in Safety Navigator.
-5. **SafeCity anonymous risk aggregation service.** If separately enabled, it receives only coarse, hourly, deduplicated SOS contributions and returns zones only after a minimum crowd threshold. It does not receive exact GPS, evidence, contacts or a stable installation identifier.
-6. **Authorities or other recipients required by law.** The operator may disclose data where legally required and will document the legal basis.
+3. **An external mapping app/provider.** It receives coordinates when the user chooses to open or share a map link.
+4. **OpenStreetMap Overpass endpoints.** The current build sends the exact current coordinates in a nearby-place and lighting query automatically when Safety Navigator opens.
+5. **OpenStreetMap routing service.** `routing.openstreetmap.de` receives exact origin and selected-destination coordinates when a route is requested.
+6. **CARTO basemap service.** It receives map tile requests for the viewed area and ordinary network metadata.
+7. **SafeCity anonymous risk aggregation service.** If separately enabled, it receives only coarse, hourly, deduplicated SOS contributions and returns zones only after a minimum crowd threshold. It does not receive exact GPS, evidence, contacts or a stable installation identifier.
+8. **Authorities or other recipients required by law.** The operator may disclose data where legally required and will document the legal basis.
 
 No cloud analytics, advertising SDK or SafeCity-hosted evidence upload exists in this repository. The optional risk aggregation service stores only the limited coarse report described above.
 

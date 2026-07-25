@@ -1,69 +1,206 @@
 # SafeCity architecture
 
-## Trust boundary
+**Baseline:** source commit `2115fd4`, reviewed 25 July 2026
+**Status:** safety-oriented prototype; not release-certified
 
-The mobile device remains the inference and evidence-storage trust boundary. Monitoring audio, motion inference, contacts and evidence do not require or call a laptop, LAN API or cloud model. An optional, separately consented risk-zone path sends only a coarse location cell and hourly distress summary to the aggregation endpoints in the Python service.
+This document describes the implementation as it exists. The most important boundary is that foreground mobile fusion, Android background protection, and the Python comparison oracle are three separate policy implementations.
 
-```text
-Expo / React Native app
-  ├─ PCM stream (0.975 s inference + 15 s RAM ring) ─> YAMNet ─────┐
-  ├─ optional emergency + multilingual threat phrase spotter ─────┤
-  ├─ DeviceMotion ─> acceleration/jerk/rotation/fall features ──────┼─> local patterns
-  ├─ optional coarse routine cell/motion/speed baseline ────────────┤   + temporal fusion
-  └─ hour + app-state (bounded context) ─────────────────────────────┘
-                                                                         └─ transient result
+## System context
 
-Confirmed SOS
-  ├─ 15 s pre-alert WAV ┐
-  ├─ rear still photo ──┤
-  ├─ front still photo ─┼─> AES-GCM ─> app-private document storage
-  └─ 15 s post audio ───┘
+```mermaid
+flowchart LR
+    subgraph Phone["User's phone"]
+        UI["Expo / React Native UI"]
+        FG["Foreground TypeScript monitoring"]
+        AND["Android native background service"]
+        DB["SQLCipher database"]
+        VAULT["AES-GCM evidence vault"]
+        RISKQ["Encrypted coarse-risk queue"]
+    end
 
-Optional anonymous risk contribution
-  └─ exact GPS (phone only) ─> zoom-16 coarse cell + hourly bucket
-                                └─ encrypted retry queue
-                                   └─ aggregation API ─> crowd threshold ─> map intensity zone
+    MAP["Overpass nearby-place service"]
+    ROUTE["OpenStreetMap routing service"]
+    TILES["CARTO map tiles"]
+    RISK["Optional SafeCity risk API"]
+    MSG["System SMS/MMS composer"]
+    ORACLE["Optional Python comparison oracle"]
+
+    UI --> FG
+    FG --> DB
+    FG --> VAULT
+    UI <--> AND
+    UI --> MAP
+    UI --> ROUTE
+    UI --> TILES
+    RISKQ --> RISK
+    UI --> MSG
+    ORACLE -. "not called by the mobile app" .- FG
 ```
 
-## Mobile modules
+The phone is the monitoring-inference and evidence-storage trust boundary. Ordinary microphone windows, motion windows, contacts, and incident evidence do not go to the Python service. Data does leave the phone for map functions, the system message composer, and the separately enabled anonymous risk feature; those flows are listed below.
 
-- `MonitoringProvider`: owns the native PCM stream, motion subscription, adaptive cadence, battery-saver state, session lifecycle, local inference and SOS transition. DeviceMotion acceleration is normalized from m/s² to g before feature extraction. GPS is not refreshed for every inference window.
-- `DatabaseProvider`: obtains a random 256-bit database key from platform SecureStore, applies the SQLCipher key before migrations, and enables WAL.
-- `capture.tsx`: suspends the monitoring stream, records evidence, switches rear → front cameras, encrypts each result, updates the incident atomically, and resumes monitoring.
-- `backgroundLocation.ts`: keeps only the latest location and uses the required visible OS background indicator.
-- `behaviorBaseline.ts`: samples at most once per minute during active in-app monitoring, derives a zoom-16 coarse cell and accuracy-adjusted speed, and learns bounded encrypted aggregate profiles across weekday/weekend and four-hour blocks. It needs 24 safe observations across three days before scoring and never retains a breadcrumb route.
-- `voice-trigger.ts`: copies the bundled quantized Sherpa-ONNX files into private cache and feeds the existing 16 kHz PCM stream into a serialized one-thread keyword spotter. Direct emergency words open the existing countdown. Limited English, Hindi and Bengali threat phrases remain armed, are de-duplicated and enter `localFusion.ts`.
-- Native `SafeCityVoiceTriggerService`: uses the same model and outdoor conditioner in a visible, battery-aware Android foreground service. A threat match produces only a discreet check notification until a second match within 20 seconds agrees with recent distress audio or violent motion.
-- `safeRoute.ts`: retrieves user-requested OpenStreetMap facilities and lighting context; generated locations are never used as a data fallback.
-- `riskZones.ts`: converts GPS to a coarse cell before transport, creates a rotating cell/day deduplication token, queues coarse reports and retrieves crowd-thresholded zones using a coarse viewing area.
-- `monitorStore.ts`: contains transient UI state only; durable history stays in SQLite.
+## Runtime and platform matrix
 
-## On-device inference modules
+| State | Active implementation | Audio | Motion | Behavior baseline | Automatic escalation |
+| --- | --- | --- | --- | --- | --- |
+| Android app active | TypeScript `MonitoringProvider` and `localFusion.ts` | YAMNet TFLite or lite features; Sherpa keyword spotter | Expo DeviceMotion features | Available when enabled | TypeScript multi-window fusion |
+| Android app backgrounded/task removed | Native `SafeCityVoiceTriggerService` | Sherpa keywords plus conditioned-audio heuristic | Native fall/violent-motion rules | Not evaluated | Native confirmation rules and notifications |
+| Android after reboot | Native receiver/service | Android 14+ requires a user-tapped notification before microphone use resumes | Motion may resume | Not evaluated | Native rules, subject to OS/vendor restrictions |
+| iOS app active | TypeScript `MonitoringProvider` and `localFusion.ts` | Foreground audio pipeline | Expo DeviceMotion features | Available when enabled | TypeScript multi-window fusion |
+| iOS app inactive/backgrounded | No equivalent native safety-monitoring service | React audio stream is stopped | React motion subscription is stopped | Not sampled | Equivalent continuous protection is not implemented |
+| Python service | `service/app/detection/` | TensorFlow Hub YAMNet | Request metadata only | Not implemented | Comparison-oracle policy only |
 
-- `onDeviceAudio.ts`: lazy-loads the APK-bundled 3.9 MB YAMNet TFLite model through the native C++ runtime, converts/resamples PCM to a fixed 15,600-sample float32 waveform, applies a conservative silence gate and scores distress/media classes. Inference runs asynchronously and is serialized to bound memory use.
-- `localFusion.ts`: calculates motion risk, evaluates inspectable risk/suppressor patterns, combines available modalities, applies bounded context, maintains the last eight windows per session, and enforces confirmation, hysteresis and incident cooldown. A behavior deviation adds only a small supporting term and is excluded from the independent-signal and automatic-SOS gates.
-- `MonitoringProvider.tsx`: retains only the latest audio tail in memory and schedules ordinary inference at 3 seconds foreground, 5 seconds background or 6 seconds in battery saver. Concerning motion temporarily uses 1.2 seconds, or 2 seconds in battery saver.
-- No ordinary inference summary or sensor history is written to durable storage. If the user enables adaptive behavior detection, only its bounded coarse aggregate profiles and day markers are durable; incidents are stored separately.
+Force-stopping the Android app stops its service and receivers until the user opens the app again. Battery restrictions and vendor task managers can interrupt foreground services.
 
-The optional `service/` implementation still mirrors the earlier server-side inference policy for comparison tests. Its `/v1/risk/*` endpoints now also provide the separately deployable anonymous aggregation API. It is not imported by the app or packaged into the APK; the mobile build connects only when `EXPO_PUBLIC_RISK_API_BASE_URL` is configured.
+## Foreground monitoring pipeline
+
+```mermaid
+flowchart LR
+    PCM["16 kHz mono PCM"] --> RING["15 s volatile ring"]
+    PCM --> WIN["Latest 15,600 samples"]
+    WIN --> NS["Outdoor conditioner"]
+    NS --> AUDIO["YAMNet or lite audio score"]
+    MOTION["DeviceMotion"] --> FEATURES["Acceleration, jerk, rotation,\nfree-fall and impact"]
+    WORDS["Sherpa word/phrase matches"] --> PHRASE["Threat phrase checks"]
+    BASE["Optional coarse aggregate baseline"] --> DEV["Supporting deviation score"]
+    AUDIO --> FUSE["localFusion.ts"]
+    FEATURES --> FUSE
+    PHRASE --> FUSE
+    DEV --> FUSE
+    FUSE --> STATE["Safe / Watch / Alert / SOS"]
+```
+
+- Normal foreground assessment cadence is approximately three seconds.
+- Concerning motion temporarily shortens it to approximately 1.2 seconds.
+- Android battery saver changes those intervals to approximately six and two seconds.
+- Location is not refreshed for every inference window.
+- Ordinary automatic SOS requires two recent confirmed multi-signal windows.
+- Exceptional distress audio plus an ordered fall-impact sequence can escalate immediately.
+- Audio alone or a single fall can request a check-in but cannot ordinarily open evidence automatically.
+- Behavior deviation is supporting evidence only and is excluded from the independent-signal and automatic-SOS gates.
+- Media playback, transport, and drop patterns suppress likely false positives.
+
+The last eight fusion windows are session memory, not incident history. Ordinary audio and motion windows are not durably stored.
+
+## Mobile components
+
+| Component | Responsibility |
+| --- | --- |
+| `mobile/src/services/MonitoringProvider.tsx` | Session lifecycle, foreground PCM/motion ownership, cadence, health, fusion, app-state handoff, and SOS transition |
+| `mobile/src/inference/onDeviceAudio.ts` | Model loading, waveform preparation, silence gating, YAMNet/lite scoring |
+| `mobile/src/inference/safetyCalibration.ts` | Deterministic motion and outdoor-audio feature calibration |
+| `mobile/src/inference/localFusion.ts` | Inspectable patterns, suppressors, temporal confirmation, hysteresis, cooldown |
+| `mobile/src/inference/behaviorBaseline.ts` | Bounded coarse-cell/time/motion/speed aggregate learning |
+| `mobile/src/services/voice-trigger.ts` | Bundled Sherpa model preparation and foreground keyword spotting |
+| `mobile/modules/safecity-voice-trigger/` | Android native foreground service, restart behavior, notifications, native audio/motion rules |
+| `mobile/src/db/DatabaseProvider.tsx` | SQLCipher key acquisition and database initialization |
+| `mobile/src/db/repository.ts` | Settings, contacts, sessions, incidents, feedback, retention, and queue storage |
+| `mobile/app/capture.tsx` | Pre-alert WAV, rear/front stills, post-alert audio, encryption, and partial-capture finalization |
+| `mobile/src/services/evidenceVault.ts` | AES-GCM evidence encryption and temporary attachment decryption |
+| `mobile/src/services/backgroundLocation.ts` | Latest location and OS background-location task |
+| `mobile/src/services/riskZones.ts` | Coarse cell, hourly bucket, rotating token, bounded retry queue, risk-zone retrieval |
+| `mobile/src/utils/safeRoute.ts` | Overpass facility/lighting lookup and walking route request |
+| `mobile/src/components/SafetyMap.tsx` | CARTO tile requests and local route/zone rendering |
+
+## SOS and evidence architecture
+
+```mermaid
+sequenceDiagram
+    participant Trigger as Manual / voice / fusion / native trigger
+    participant Incident as SQLCipher incident
+    participant Capture as Protected capture screen
+    participant Vault as AES-GCM vault
+    participant Composer as System composer
+
+    Trigger->>Incident: Create incident with decision and best location
+    Trigger->>Capture: Open or post notification
+    Capture->>Capture: Suspend monitoring
+    Capture->>Vault: Encrypt available 15 s pre-alert WAV
+    Capture->>Vault: Encrypt rear then front still
+    Capture->>Vault: Encrypt 15 s post-alert audio
+    Note over Capture,Vault: 27 s watchdog permits partial/unavailable completion
+    Capture->>Incident: Store evidence status and URIs
+    Capture->>Composer: Prepare text and temporary decrypted attachments
+    Composer-->>Capture: User sends or cancels
+    Capture->>Capture: Clean temporary files and resume monitoring
+```
+
+The app cannot silently send a message and does not treat an opened composer as delivery. Camera evidence is possible only while the protected capture screen is visible. Capture failures leave the incident intact and mark missing evidence explicitly.
+
+## Durable data
+
+The database key is a random 256-bit value stored in platform SecureStore. SQLCipher is keyed before migrations, with cipher memory security, secure deletion, foreign keys, and WAL enabled.
+
+| Store | Contents |
+| --- | --- |
+| SQLCipher `settings` | Choices, versioned consent state, retention, cached translation packs |
+| SQLCipher `contacts` | Emergency-contact name and number |
+| SQLCipher `sessions` | Monitoring session state and timestamps |
+| SQLCipher `incidents` | Trigger summary, optional exact incident location, evidence URIs/status, feedback and resolution |
+| SQLCipher `anonymous_risk_queue` | Coarse unsent reports and retry metadata |
+| SQLCipher baseline tables | Bounded coarse aggregate profiles and day markers |
+| SecureStore | Database key, evidence key, risk-token secret, local identifiers/preferences |
+| App-private files | AES-GCM encrypted incident evidence |
+| Volatile memory | Current PCM ring, sensor windows, recent fusion history, keyword batches |
+
+## Network and third-party data flows
+
+| Action | Recipient | Data sent | Persistence in SafeCity |
+| --- | --- | --- | --- |
+| Open Safety Navigator | Overpass endpoint | Current exact coordinates inside a nearby-facility/lighting query | Response is screen state only |
+| Select a mapped destination | `routing.openstreetmap.de` | Exact origin and destination coordinates | Route is screen state only |
+| Render Safety Navigator map | CARTO basemap host | Tile coordinates plus normal network metadata such as IP address | Tiles are not written to incident history |
+| Open incident location externally | Chosen mapping app/provider | Incident coordinates | Controlled by the external app |
+| Prepare SOS message | System SMS/MMS composer | Contacts, message, location link, temporary evidence attachments | Messaging app may retain a draft or sent copy |
+| Enable anonymous community risk reporting | Configured SafeCity risk API | Zoom-16 cell, hour bucket, trigger category, accuracy band, rotating cell/day token | Coarse queue retained locally until accepted/expired |
+| Use device translation support | OS/translation implementation used by `expo-translate-text` | Depends on platform implementation | Cached translation pack may be stored locally |
+
+Safety Navigator currently loads nearby places automatically on entry, not after a separate “load” action. This and the route/tile disclosures are audit findings in [AUDIT_REPORT.md](AUDIT_REPORT.md).
+
+## Anonymous risk aggregation
+
+```mermaid
+flowchart LR
+    GPS["Exact fix on phone"] --> CELL["Zoom-16 coarse cell"]
+    CELL --> REPORT["Cell + hour + category + accuracy band"]
+    SECRET["Secure random secret"] --> TOKEN["SHA-256(secret | day | cell)"]
+    TOKEN --> REPORT
+    REPORT --> QUEUE["Encrypted bounded retry queue"]
+    QUEUE --> API["Risk API"]
+    API --> STORE["Coarse SQLite report"]
+    STORE --> THRESHOLD{"At least 3 qualifying reports?"}
+    THRESHOLD -- "No" --> HIDE["No public zone"]
+    THRESHOLD -- "Yes" --> ZONE["Intensity band; no exact count/token/time"]
+```
+
+Reports expire after at most 30 days by default. The server never receives exact GPS through this flow, but network infrastructure can still observe ordinary connection metadata. The mobile configuration currently accepts both HTTP and HTTPS URLs; production must enforce HTTPS.
+
+## Python service boundary
+
+The FastAPI service exposes:
+
+- health, comparison analysis, comparison pattern, feedback, erasure, and metrics routes; and
+- optional anonymous risk report/zone routes.
+
+No route currently authenticates callers. Only the risk routes have process-local address-based rate limiting. The provided Compose configuration publishes port 8000 on every host interface. The container runs as a non-root user, disables privilege escalation, turns off Uvicorn access logs, and uses a bounded memory configuration, but a production deployment still requires TLS, ingress separation, authentication/authorization for private routes, and shared abuse controls. See [API_REFERENCE.md](API_REFERENCE.md).
 
 ## Failure behavior
 
-| Failure | Safe behavior |
+| Failure | Current behavior |
 | --- | --- |
-| Bundled model fails to load | Motion-only local fallback; automatic audio-motion SOS is disabled; manual SOS remains available |
-| Microphone denied | Motion monitoring continues with visibly degraded health |
-| Motion unavailable | Audio may request check-in but cannot automatically SOS |
-| Location denied | Incident is stored without a location; detection is unchanged |
-| Adaptive baseline is off, warming up or lacks accurate GPS | Existing audio/motion/keyword detection is unchanged; Local AI explains the unavailable or motion-only coverage |
-| Bundled keyword engine fails to load | Voice trigger shows an error; scream, motion and manual SOS remain available |
-| Nearby-place request fails | No pins are fabricated; Maps search and 112 remain available |
-| Anonymous risk service fails | SOS continues normally; a coarse-only report remains in the bounded local retry queue and the map omits the optional layer |
-| Camera denied/backgrounded | Incident remains active; available audio is saved; missing evidence is explicit |
-| SMS unavailable | Incident stays local and UI shows the failure; no delivery claim |
-| App UI closed/swiped away | The visible Android foreground service continues opted-in audio, keyword and motion checks; vendor restrictions can still interrupt it |
-| App force-stopped | Android stops background protection until the user opens SafeCity again |
+| Foreground YAMNet fails | Lite/motion fallback; manual SOS remains |
+| Microphone or motion unavailable after onboarding | Remaining lower-layer functions can degrade, but the root/onboarding gate currently requires every permission |
+| Location cannot be refreshed during SOS | Incident is stored without a new location |
+| Baseline disabled, warming, or inaccurate | Audio/motion/keyword rules remain; deviation contributes nothing |
+| Keyword engine fails | Voice trigger reports an error; other trigger paths remain |
+| Nearby-place or route request fails | No pins or route are fabricated; alternative search/112 controls remain |
+| Anonymous risk API fails | SOS remains local; eligible coarse report stays in the bounded retry queue |
+| Camera unavailable/backgrounded | Incident remains active; available evidence is retained and status becomes partial/unavailable |
+| SMS/MMS unavailable or canceled | Incident remains local; no delivery claim is made |
+| Android app task removed | Native service attempts to continue, subject to OS/vendor restrictions |
+| Android app force-stopped | Background protection stops until the user reopens SafeCity |
+| iOS app leaves active state | Foreground audio and motion stop; no equivalent persistent service takes over |
 
-## Production gaps
+## Production boundary
 
-This repository is a safety-oriented MVP, not a release-certified product. A production pilot still requires a protected release keystore, signed model/config update and rollback controls, a reviewed delivery provider, a representative consented dataset, real-device background tests, battery and thermal profiling, accessibility review, mobile security review, completed Data Fiduciary and grievance contacts, language access, operational rights and breach procedures, applicable processor contracts, and Indian legal/privacy review. See [DPDP_COMPLIANCE.md](DPDP_COMPLIANCE.md).
+SafeCity is not ready for a public safety claim or general release. The blocking evidence and remediation sequence are in [AUDIT_REPORT.md](AUDIT_REPORT.md). At minimum, a controlled pilot needs representative consented validation, supported-device background tests, battery/thermal measurements, security/privacy/accessibility/legal review, corrected permission and disclosure UX, hardened service ingress, completed operator/grievance details, release signing and rollback controls, and an audited delivery path.
