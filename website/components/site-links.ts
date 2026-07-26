@@ -1,4 +1,4 @@
-export const DOWNLOAD_URL = "https://www.buildshare.in/share/7oYenXJ";
+export const DOWNLOAD_URL = "https://www.buildshare.in/share/No85oDf";
 
 export const FEEDBACK_URL =
   "https://docs.google.com/forms/d/1KLAZeW78lqwySjcB51BwE596K-SI5J56uYQBvbXVUmM/viewform?edit_requested=true";
