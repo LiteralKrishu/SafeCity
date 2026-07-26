@@ -990,8 +990,8 @@
     "semantic_hash": ""
   },
   "website/app/data-rights/page.tsx": {
-    "mtime": 1785076898.8840942,
-    "ast_hash": "85da6217fcc32d63a8438a3c303aafbc",
+    "mtime": 1785083809.2909174,
+    "ast_hash": "a6a7c7ce6bc6a291958abcfa9519f6df",
     "semantic_hash": ""
   },
   "website/app/download/page.tsx": {
@@ -1090,8 +1090,8 @@
     "semantic_hash": ""
   },
   "website/components/site-links.ts": {
-    "mtime": 1785073997.8717053,
-    "ast_hash": "732c6ac7e3f51abbda182b7ebaff183a",
+    "mtime": 1785078635.077533,
+    "ast_hash": "b41bfcef31a968c732fa16b9ead8aa3a",
     "semantic_hash": ""
   },
   "website/components/ui.tsx": {
@@ -1100,8 +1100,8 @@
     "semantic_hash": ""
   },
   "website/next-env.d.ts": {
-    "mtime": 1785076113.0888565,
-    "ast_hash": "d0f8375ae1199dc7acd3977fc33b78b8",
+    "mtime": 1785078721.2363222,
+    "ast_hash": "2a74d3909800ca5467fa83b0ab4a4890",
     "semantic_hash": ""
   },
   "website/next.config.ts": {

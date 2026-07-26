@@ -1,16 +1,16 @@
 # Graph Report - SafeCity  (2026-07-26)
 
 ## Corpus Check
-- 164 files · ~578,866 words
+- 164 files · ~578,867 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1295 nodes · 2054 edges · 77 communities (67 shown, 10 thin omitted)
+- 1295 nodes · 2046 edges · 73 communities (63 shown, 10 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 36 edges (avg confidence: 0.68)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a0bf7d7b`
+- Built from commit: `5d283ba8`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -31,8 +31,6 @@
 - [[_COMMUNITY_SafeCity architecture|SafeCity architecture]]
 - [[_COMMUNITY_capture.tsx|capture.tsx]]
 - [[_COMMUNITY_SafeCity|SafeCity]]
-- [[_COMMUNITY_sms.ts|sms.ts]]
-- [[_COMMUNITY__layout.tsx|_layout.tsx]]
 - [[_COMMUNITY_package.json|package.json]]
 - [[_COMMUNITY_calculator.tsx|calculator.tsx]]
 - [[_COMMUNITY_Validation and rollout checklist|Validation and rollout checklist]]
@@ -60,7 +58,6 @@
 - [[_COMMUNITY_Safety sensor calibration|Safety sensor calibration]]
 - [[_COMMUNITY_sms.ts|sms.ts]]
 - [[_COMMUNITY_SafeCityProtectionBootReceiver|SafeCityProtectionBootReceiver]]
-- [[_COMMUNITY__layout.tsx|_layout.tsx]]
 - [[_COMMUNITY_with-safecity-theme-colors.js|with-safecity-theme-colors.js]]
 - [[_COMMUNITY_Background monitoring lifecycle|Background monitoring lifecycle]]
 - [[_COMMUNITY_haptics.ts|haptics.ts]]
@@ -71,7 +68,6 @@
 - [[_COMMUNITY_SafetyMap.tsx|SafetyMap.tsx]]
 - [[_COMMUNITY_Validation and rollout plan|Validation and rollout plan]]
 - [[_COMMUNITY_useMonitorStore|useMonitorStore]]
-- [[_COMMUNITY_types.ts|types.ts]]
 - [[_COMMUNITY_sensor.tsx|[sensor].tsx]]
 - [[_COMMUNITY_index.tsx|index.tsx]]
 - [[_COMMUNITY_theme-provider.tsx|theme-provider.tsx]]
@@ -99,30 +95,30 @@
   mobile/modules/safecity-interruption/android/src/main/java/com/safecity/interruption/SafeCityInterruptionModule.kt → website/tsconfig.json
 - `SafeCityMmsModule` --inherits--> `module`  [EXTRACTED]
   mobile/modules/safecity-mms/android/src/main/java/com/safecity/mms/SafeCityMmsModule.kt → website/tsconfig.json
-- `LanguagePicker()` --calls--> `useLocalization()`  [EXTRACTED]
-  mobile/src/components/language-picker.tsx → mobile/src/i18n/localization-provider.tsx
-- `TabLayout()` --calls--> `useLocalization()`  [EXTRACTED]
-  mobile/app/(tabs)/_layout.tsx → mobile/src/i18n/localization-provider.tsx
-- `ChoiceSheet()` --calls--> `useLocalization()`  [EXTRACTED]
-  mobile/src/components/choice-sheet.tsx → mobile/src/i18n/localization-provider.tsx
+- `SettingsScreen()` --calls--> `useMonitoring()`  [EXTRACTED]
+  mobile/app/(tabs)/settings.tsx → mobile/src/services/MonitoringProvider.tsx
+- `CaptureScreen()` --calls--> `useMonitoring()`  [EXTRACTED]
+  mobile/app/capture.tsx → mobile/src/services/MonitoringProvider.tsx
+- `OnboardingScreen()` --calls--> `useMonitoring()`  [EXTRACTED]
+  mobile/app/onboarding.tsx → mobile/src/services/MonitoringProvider.tsx
 
 ## Import Cycles
 - 1-file cycle: `website/components/navigation.tsx -> website/components/navigation.tsx`
 - 1-file cycle: `mobile/metro.config.js -> mobile/metro.config.js`
 
-## Communities (77 total, 10 thin omitted)
+## Communities (73 total, 10 thin omitted)
 
 ### Community 0 - "localization-provider.tsx"
-Cohesion: 0.27
-Nodes (9): CachedTranslationPack, cacheKey(), isCompletePack(), prepareTranslationPack(), readCachedTranslationPack(), TranslationPack, writeCachedTranslationPack(), englishTranslations (+1 more)
+Cohesion: 0.12
+Nodes (18): CachedTranslationPack, cacheKey(), isCompletePack(), prepareTranslationPack(), readCachedTranslationPack(), TranslationPack, writeCachedTranslationPack(), englishTranslations (+10 more)
 
 ### Community 1 - "[sensor].tsx"
 Cohesion: 0.16
 Nodes (10): BoundedResult, CapturePhase, CaptureScreen(), styles, SosCountdownScreen(), styles, SettingsScreen(), updateIncidentEvidence() (+2 more)
 
 ### Community 2 - "useLocalization"
-Cohesion: 0.21
-Nodes (13): PrivacyNoticeScreen(), DataRightsScreen(), TermsScreen(), HistoryScreen(), LegalDocumentScreen(), styles, useLocalization(), legalConfigurationComplete (+5 more)
+Cohesion: 0.07
+Nodes (34): PrivacyNoticeScreen(), DataRightsScreen(), TermsScreen(), HistoryScreen(), styles, TabIconName, TabLayout(), ChoiceItem (+26 more)
 
 ### Community 3 - "SafeCity Terms and Conditions"
 Cohesion: 0.11
@@ -145,8 +141,8 @@ Cohesion: 0.13
 Nodes (20): AudioTarget, styles, styles, addContact(), defaultSettings, deleteIncidentRecord(), eraseAllLocalData(), getIncident() (+12 more)
 
 ### Community 8 - "settings.tsx"
-Cohesion: 0.27
-Nodes (4): EscapeToolCard(), styles, LanguagePicker(), styles
+Cohesion: 0.40
+Nodes (3): lifecycle, metadata, rights
 
 ### Community 9 - "voice-trigger.ts"
 Cohesion: 0.05
@@ -176,14 +172,6 @@ Nodes (6): decryptEvidenceToCache(), encryptEvidenceBytes(), encryptEvidenceFile
 Cohesion: 0.15
 Nodes (13): Build the native app, Build troubleshooting, Documentation map, Evidence and platform constraints, License, On-device AI runtime, Privacy and legal readiness, Repository layout (+5 more)
 
-### Community 16 - "sms.ts"
-Cohesion: 0.50
-Nodes (3): ChoiceItem, ChoiceSheet(), styles
-
-### Community 17 - "_layout.tsx"
-Cohesion: 0.15
-Nodes (11): readStoredLanguagePreference(), secureStoreOptions, writeStoredLanguagePreference(), LocalizationContext, LocalizationValue, TranslationParams, bn, en (+3 more)
-
 ### Community 18 - "package.json"
 Cohesion: 0.22
 Nodes (8): reactNativeDirectoryCheck, expo, doctor, main, name, private, exclude, version
@@ -202,7 +190,7 @@ Nodes (3): Bundled YAMNet model, Runtime profiles, Bundled emergency-word and th
 
 ### Community 23 - "reactNativeDirectoryCheck"
 Cohesion: 0.05
-Nodes (47): metadata, profiles, team, lifecycle, metadata, rights, metadata, escapeTools (+39 more)
+Nodes (44): metadata, profiles, team, metadata, escapeTools, featureIndex, metadata, decisionRows (+36 more)
 
 ### Community 27 - "SafeCityVoiceTriggerService"
 Cohesion: 0.06
@@ -276,10 +264,6 @@ Nodes (12): AutomaticSosDispatchResult, buildIncidentSmsMessage(), buildReadable
 Cohesion: 0.16
 Nodes (18): Any, BroadcastReceiver, Map, attemptLaunch(), cancel(), createChannels(), dismiss(), Context (+10 more)
 
-### Community 46 - "_layout.tsx"
-Cohesion: 0.40
-Nodes (3): styles, TabIconName, TabLayout()
-
 ### Community 47 - "with-safecity-theme-colors.js"
 Cohesion: 0.40
 Nodes (3): {
@@ -308,10 +292,6 @@ Nodes (13): 1. Audit-run results, 2. Missing automated coverage, 3. Physical-dev
 ### Community 61 - "useMonitorStore"
 Cohesion: 0.23
 Nodes (8): ProtectionTestsScreen(), statusColor(), styles, TestTile(), styles, initialHealth, MonitorStore, useMonitorStore
-
-### Community 62 - "types.ts"
-Cohesion: 0.20
-Nodes (9): BundledLanguage, bundledLanguageSet, detectDeviceLanguage(), isSupportedLanguage(), languageAliases, languageCodeSet, LanguagePreference, normalizeLanguagePreference() (+1 more)
 
 ### Community 63 - "[sensor].tsx"
 Cohesion: 0.24
@@ -342,24 +322,24 @@ Cohesion: 0.50
 Nodes (3): Routes, Run locally, SafeCity website
 
 ## Knowledge Gaps
-- **486 isolated node(s):** `name`, `slug`, `scheme`, `version`, `orientation` (+481 more)
+- **486 isolated node(s):** `metadata`, `rights`, `lifecycle`, `name`, `slug` (+481 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `TranslationKey` connect `_layout.tsx` to `localization-provider.tsx`, `fake-call.tsx`, `repository.ts`?**
-  _High betweenness centrality (0.016) - this node is a cross-community bridge._
+- **Why does `TranslationKey` connect `useLocalization` to `localization-provider.tsx`, `fake-call.tsx`, `repository.ts`?**
+  _High betweenness centrality (0.018) - this node is a cross-community bridge._
 - **Why does `BrandLogo()` connect `_layout.tsx` to `index.tsx`?**
   _High betweenness centrality (0.014) - this node is a cross-community bridge._
 - **Why does `SafeCity engineering, privacy, security, and readiness audit` connect `safetyCalibration.ts` to `README.md`?**
   _High betweenness centrality (0.011) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `Intent` (e.g. with `.definition()` and `.definition()`) actually correct?**
   _`Intent` has 2 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `name`, `slug`, `scheme` to the rest of the system?**
+- **What connects `metadata`, `rights`, `lifecycle` to the rest of the system?**
   _490 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `SafeCity Terms and Conditions` be split into smaller, more focused modules?**
-  _Cohesion score 0.1111111111111111 - nodes in this community are weakly interconnected._
-- **Should `dependencies` be split into smaller, more focused modules?**
-  _Cohesion score 0.05714285714285714 - nodes in this community are weakly interconnected._
+- **Should `localization-provider.tsx` be split into smaller, more focused modules?**
+  _Cohesion score 0.11956521739130435 - nodes in this community are weakly interconnected._
+- **Should `useLocalization` be split into smaller, more focused modules?**
+  _Cohesion score 0.06666666666666667 - nodes in this community are weakly interconnected._
