@@ -6,12 +6,14 @@
     "version": "2.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/safecity-app-icon.png",
     "platforms": [
       "ios",
       "android"
     ],
     "ios": {
       "supportsTablet": true,
+      "icon": "./assets/safecity-app-icon.png",
       "bundleIdentifier": "com.safecity.mobile",
       "config": {
         "usesNonExemptEncryption": false
@@ -26,8 +28,11 @@
     "android": {
       "package": "com.safecity.mobile",
       "allowBackup": false,
+      "icon": "./assets/safecity-app-icon.png",
       "adaptiveIcon": {
-        "backgroundColor": "#07111F"
+        "foregroundImage": "./assets/safecity-adaptive-icon.png",
+        "monochromeImage": "./assets/safecity-monochrome-icon.png",
+        "backgroundColor": "#FFFFFF"
       },
       "permissions": [
         "CAMERA",
@@ -47,6 +52,19 @@
     "plugins": [
       "./plugins/with-safecity-theme-colors",
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/safecity-logo.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF",
+          "dark": {
+            "image": "./assets/safecity-logo.png",
+            "backgroundColor": "#080B13"
+          }
+        }
+      ],
       [
         "expo-camera",
         {
@@ -80,7 +98,9 @@
       [
         "expo-notifications",
         {
-          "defaultChannel": "safety-status"
+          "defaultChannel": "safety-status",
+          "icon": "./assets/safecity-notification-icon.png",
+          "color": "#16BFCB"
         }
       ],
       [

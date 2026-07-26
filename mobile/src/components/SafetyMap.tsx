@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  type GestureResponderEvent,
   Image,
   Linking,
   Pressable,
@@ -43,8 +44,8 @@ interface Tile {
 }
 
 const TILE_SIZE = 256;
-const MIN_ZOOM = 12;
-const MAX_ZOOM = 16;
+const MIN_ZOOM = 11;
+const MAX_ZOOM = 19;
 const DEFAULT_ZOOM = 13;
 
 function coordinateToWorldPixel(
@@ -157,6 +158,7 @@ export function SafetyMap({
   const mapStyle = useColorScheme() === 'light' ? 'light_all' : 'dark_all';
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [viewport, setViewport] = useState({ width: 0, height });
+  const pinchStart = useRef<{ distance: number; zoom: number } | null>(null);
   const focusCoordinates: RouteCoordinate[] = [
     center,
     ...route,
@@ -244,10 +246,44 @@ export function SafetyMap({
     );
   };
 
+  const pinchDistance = (event: GestureResponderEvent): number | null => {
+    const [first, second] = event.nativeEvent.touches;
+    if (!first || !second) return null;
+    return Math.hypot(first.pageX - second.pageX, first.pageY - second.pageY);
+  };
+
+  const startPinch = (event: GestureResponderEvent) => {
+    const distance = pinchDistance(event);
+    if (distance === null) return;
+    pinchStart.current = { distance, zoom };
+  };
+
+  const movePinch = (event: GestureResponderEvent) => {
+    const distance = pinchDistance(event);
+    const start = pinchStart.current;
+    if (distance === null || !start || start.distance <= 0) return;
+    const zoomDelta = Math.round(Math.log2(distance / start.distance) * 2);
+    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, start.zoom + zoomDelta)));
+  };
+
+  const endPinch = () => {
+    pinchStart.current = null;
+  };
+
   return (
     <View
       accessibilityLabel="Interactive in-app safety map"
       onLayout={handleLayout}
+      onMoveShouldSetResponderCapture={(event) =>
+        event.nativeEvent.touches.length === 2
+      }
+      onResponderGrant={startPinch}
+      onResponderMove={movePinch}
+      onResponderRelease={endPinch}
+      onResponderTerminate={endPinch}
+      onStartShouldSetResponderCapture={(event) =>
+        event.nativeEvent.touches.length === 2
+      }
       style={[styles.map, { height }]}
     >
       {tiles.map((tile) => (
@@ -424,6 +460,10 @@ export function SafetyMap({
         </Text>
       </View>
 
+      <View pointerEvents="none" style={styles.pinchHint}>
+        <Text style={styles.pinchHintText}>PINCH TO ZOOM</Text>
+      </View>
+
       <Pressable
         accessibilityRole="link"
         onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
@@ -593,6 +633,22 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 1,
+  },
+  pinchHint: {
+    position: 'absolute',
+    zIndex: 5,
+    left: spacing.xs,
+    bottom: spacing.xs,
+    borderRadius: radii.sm,
+    backgroundColor: colors.navigation,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+  },
+  pinchHintText: {
+    color: colors.textMuted,
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.7,
   },
   attribution: {
     position: 'absolute',

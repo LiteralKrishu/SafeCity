@@ -5,20 +5,29 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, Vibration, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useLocalization } from '@/i18n/localization-provider';
+import {
+  resolveSosCountdownDeadline,
+  SOS_COUNTDOWN_MS,
+  SOS_COUNTDOWN_SECONDS,
+  sosCountdownSecondsRemaining,
+} from '@/inference/sosCountdown';
 import { useMonitoring } from '@/services/MonitoringProvider';
+import { acknowledgePersistentDetection } from '@/services/persistent-voice-trigger';
 import { colors, radii, spacing, type } from '@/theme/tokens';
-
-const COUNTDOWN_SECONDS = 10;
 
 export default function SosCountdownScreen() {
   const router = useRouter();
-  const { source, keyword } = useLocalSearchParams<{
+  const { source, keyword, startedAt } = useLocalSearchParams<{
     source?: string;
     keyword?: string;
+    startedAt?: string;
   }>();
   const monitoring = useMonitoring();
   const { t } = useLocalization();
-  const [remaining, setRemaining] = useState(COUNTDOWN_SECONDS);
+  const deadline = useRef(resolveSosCountdownDeadline(startedAt));
+  const [remaining, setRemaining] = useState(() =>
+    sosCountdownSecondsRemaining(deadline.current),
+  );
   const [activating, setActivating] = useState(false);
   const triggered = useRef(false);
 
@@ -28,11 +37,16 @@ export default function SosCountdownScreen() {
   }, []);
 
   useEffect(() => {
-    if (remaining > 0 || triggered.current) {
-      const timeout = setTimeout(() => setRemaining((value) => Math.max(0, value - 1)), 1_000);
-      return () => clearTimeout(timeout);
-    }
+    deadline.current = resolveSosCountdownDeadline(startedAt);
+    const updateRemaining = () =>
+      setRemaining(sosCountdownSecondsRemaining(deadline.current));
+    updateRemaining();
+    const interval = setInterval(updateRemaining, 250);
+    return () => clearInterval(interval);
+  }, [startedAt]);
 
+  useEffect(() => {
+    if (remaining > 0 || triggered.current) return;
     triggered.current = true;
     setActivating(true);
     Vibration.cancel();
@@ -45,10 +59,14 @@ export default function SosCountdownScreen() {
           : source === 'audio'
             ? monitoring.triggerAudioSos
             : monitoring.triggerManualSos;
-    void trigger().catch(() => {
+    void (async () => {
+      await acknowledgePersistentDetection().catch(() => undefined);
+      await trigger();
+    })().catch(() => {
       triggered.current = false;
       setActivating(false);
-      setRemaining(COUNTDOWN_SECONDS);
+      deadline.current = Date.now() + SOS_COUNTDOWN_MS;
+      setRemaining(SOS_COUNTDOWN_SECONDS);
       if (
         source === 'voice' ||
         source === 'threat' ||
@@ -58,7 +76,6 @@ export default function SosCountdownScreen() {
         void monitoring.rearmVoiceTrigger();
       }
     });
-    return undefined;
   }, [monitoring, remaining, source]);
 
   const cancel = () => {

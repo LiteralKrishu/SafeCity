@@ -80,6 +80,7 @@ export default function SettingsScreen() {
   const voiceTriggerStatus = useMonitorStore(
     (state) => state.telemetry.voiceTriggerStatus,
   );
+  const power = useMonitorStore((state) => state.power);
 
   const refresh = useCallback(async () => {
     const [storedSettings, storedContacts] = await Promise.all([readSettings(db), listContacts(db)]);
@@ -409,6 +410,39 @@ export default function SettingsScreen() {
       </Card>
 
       <Card
+        title="Safety modes"
+        subtitle="Simple controls for discreet use and low battery."
+      >
+        <View style={styles.modeRow}>
+          <View style={styles.modeIcon}>
+            <Text style={styles.modeIconText}>●</Text>
+          </View>
+          <View style={styles.settingCopy}>
+            <Text style={styles.settingTitle}>Stealth screen</Text>
+            <Text style={styles.settingDescription}>
+              Start it manually from Home. Double-tap the dark screen to return.
+              It never starts by itself.
+            </Text>
+          </View>
+          <Text style={styles.modeState}>MANUAL</Text>
+        </View>
+        <View style={styles.modeRow}>
+          <View style={[styles.modeIcon, styles.batteryModeIcon]}>
+            <Text style={styles.modeIconText}>▰</Text>
+          </View>
+          <View style={styles.settingCopy}>
+            <Text style={styles.settingTitle}>Low battery survival</Text>
+            <Text style={styles.settingDescription}>
+              Below 10%, heavy checks pause and GPS + SOS SMS stay ready.
+            </Text>
+          </View>
+          <Text style={[styles.modeState, power.survivalMode && styles.modeStateActive]}>
+            {power.survivalMode ? `${power.batteryLevel ?? 0}% ON` : 'AUTO'}
+          </Text>
+        </View>
+      </Card>
+
+      <Card
         title={t('settings.aiTitle')}
         subtitle={t('settings.aiDetail')}
       >
@@ -727,6 +761,29 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   localAiList: { gap: spacing.sm, marginTop: spacing.md },
+  modeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  modeIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: colors.safeSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  batteryModeIcon: { backgroundColor: colors.watchSoft },
+  modeIconText: { color: colors.safe, fontSize: 16, fontWeight: '900' },
+  modeState: {
+    color: colors.textMuted,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  modeStateActive: { color: colors.watch },
   localAiRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   localAiMark: { color: colors.safe, fontWeight: '900' },
   localAiText: { flex: 1, color: colors.textMuted, fontSize: type.caption, lineHeight: 18 },

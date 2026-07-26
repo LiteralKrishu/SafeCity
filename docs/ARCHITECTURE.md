@@ -96,7 +96,7 @@ The last eight fusion windows are session memory, not incident history. Ordinary
 | `mobile/src/db/DatabaseProvider.tsx` | SQLCipher key acquisition and database initialization |
 | `mobile/src/db/repository.ts` | Settings, contacts, sessions, incidents, feedback, retention, and queue storage |
 | `mobile/app/capture.tsx` | Pre-alert WAV, rear/front stills, post-alert audio, encryption, and partial-capture finalization |
-| `mobile/src/services/evidenceVault.ts` | AES-GCM evidence encryption and temporary attachment decryption |
+| `mobile/src/services/evidence.ts` | AES-GCM evidence encryption and temporary attachment decryption |
 | `mobile/src/services/backgroundLocation.ts` | Latest location and OS background-location task |
 | `mobile/src/services/riskZones.ts` | Coarse cell, hourly bucket, rotating token, bounded retry queue, risk-zone retrieval |
 | `mobile/src/utils/safeRoute.ts` | Overpass facility/lighting lookup and walking route request |

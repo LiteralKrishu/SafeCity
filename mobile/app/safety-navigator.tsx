@@ -5,7 +5,6 @@ import {
   Alert,
   Linking,
   Modal,
-  Platform,
   Pressable,
   Share,
   StyleSheet,
@@ -291,22 +290,8 @@ export default function SafetyNavigatorScreen() {
     if (!activeLocation) return;
     const { latitude, longitude } = activeLocation;
     const query = `${chosenCategory.query} near ${latitude},${longitude}`;
-    const deviceMapsUrl =
-      Platform.OS === 'ios'
-        ? `http://maps.apple.com/?q=${encodeURIComponent(query)}`
-        : `geo:${latitude},${longitude}?q=${encodeURIComponent(query)}`;
     const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
-    Alert.alert('Open outside SafeCity', `Search for ${chosenCategory.title.toLowerCase()} using:`, [
-      {
-        text: Platform.OS === 'ios' ? 'Apple Maps' : 'Device Maps',
-        onPress: () => void openUrl(deviceMapsUrl),
-      },
-      {
-        text: 'Google Maps',
-        onPress: () => void openUrl(googleMapsUrl),
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    await openUrl(googleMapsUrl);
   };
 
   const shareWalkCheckIn = async () => {
@@ -458,8 +443,8 @@ export default function SafetyNavigatorScreen() {
             <View style={styles.mapPrivacy}>
               <Text style={styles.mapPrivacyTitle}>Route stays inside SafeCity</Text>
               <Text style={styles.mapPrivacyText}>
-                Tap any nearby pin to redraw the pedestrian route. SafeCity does not store your map
-                history.
+                Pinch in or out to zoom. Tap a pin to redraw the route. Open
+                Google Maps for live directions.
               </Text>
             </View>
 
@@ -615,7 +600,7 @@ export default function SafetyNavigatorScreen() {
             onPress={() => void openInAppMap(selected)}
           />
           <ActionButton
-            label="Search outside SafeCity"
+            label="Open Google Maps search"
             loading={loading}
             variant="secondary"
             onPress={() => void openNearbySearch()}

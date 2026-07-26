@@ -5,6 +5,10 @@ import { TurboModuleRegistry } from 'react-native';
 
 import { conditionOutdoorAudio } from '@/inference/audioConditioning';
 import {
+  emergencyKeywordPassesLoudnessGate,
+  HELP_BACHAO_LOUDNESS_WINDOW_MS,
+} from '@/inference/voiceTriggerLoudness';
+import {
   getThreatPhrase,
   isThreatPhraseKeyword,
   THREAT_PHRASES,
@@ -85,6 +89,28 @@ let listening = false;
 let sessionGeneration = 0;
 let nativeOperationQueue: Promise<void> = Promise.resolve();
 let kwsPromise: Promise<(typeof import('@siteed/sherpa-onnx.rn'))['KWS']> | null = null;
+let recentEmergencyRms = 0;
+let recentEmergencyRmsAt = 0;
+
+function resetEmergencyLoudness(): void {
+  recentEmergencyRms = 0;
+  recentEmergencyRmsAt = 0;
+}
+
+function rememberEmergencyLoudness(samples: number[], now = Date.now()): void {
+  if (!samples.length) return;
+  let sumSquares = 0;
+  for (const sample of samples) sumSquares += sample * sample;
+  const rms = Math.sqrt(sumSquares / samples.length);
+  if (
+    recentEmergencyRmsAt === 0 ||
+    now - recentEmergencyRmsAt > HELP_BACHAO_LOUDNESS_WINDOW_MS ||
+    rms >= recentEmergencyRms
+  ) {
+    recentEmergencyRms = rms;
+    recentEmergencyRmsAt = now;
+  }
+}
 
 function hasNativeKeywordEngine(): boolean {
   return isSupportedPlatform() && TurboModuleRegistry.get('SherpaOnnx') !== null;
@@ -239,6 +265,7 @@ export async function prepareVoiceTrigger(): Promise<VoiceTriggerPreparation> {
 
 export async function startVoiceTriggerRecognition(): Promise<void> {
   const generation = ++sessionGeneration;
+  resetEmergencyLoudness();
   await initializeVoiceTriggerModel();
   if (generation !== sessionGeneration) return;
   const keywordEngine = await loadKeywordEngine();
@@ -250,6 +277,7 @@ export async function startVoiceTriggerRecognition(): Promise<void> {
 export async function stopVoiceTriggerRecognition(): Promise<void> {
   sessionGeneration += 1;
   listening = false;
+  resetEmergencyLoudness();
   if (initialized) {
     const keywordEngine = await loadKeywordEngine();
     await runNativeOperation(() => keywordEngine.resetStream());
@@ -259,6 +287,7 @@ export async function stopVoiceTriggerRecognition(): Promise<void> {
 export async function releaseVoiceTriggerRecognition(): Promise<void> {
   sessionGeneration += 1;
   listening = false;
+  resetEmergencyLoudness();
   if (!initialized) return;
   const keywordEngine = await loadKeywordEngine();
   const result = await runNativeOperation(() => keywordEngine.release());
@@ -290,6 +319,7 @@ export async function processVoiceTriggerPcm(
   const generation = sessionGeneration;
   const conditioned = conditionOutdoorAudio(pcmBytes, sampleRate);
   const samples = normalizedSamples(conditioned.pcmBytes);
+  rememberEmergencyLoudness(samples);
   const keywordEngine = await loadKeywordEngine();
   const result = await runNativeOperation(() => keywordEngine.acceptWaveform(sampleRate, samples));
   if (!result.success) {
@@ -303,6 +333,11 @@ export async function processVoiceTriggerPcm(
     .replace(/^_+|_+$/g, '') as VoiceTriggerKeyword;
   if (!SUPPORTED_KEYWORDS.has(keyword)) return null;
   await runNativeOperation(() => keywordEngine.resetStream());
+  if (!emergencyKeywordPassesLoudnessGate(keyword, recentEmergencyRms)) {
+    resetEmergencyLoudness();
+    return null;
+  }
+  resetEmergencyLoudness();
   if (isThreatPhraseKeyword(keyword)) {
     return {
       display: getThreatPhrase(keyword).display,

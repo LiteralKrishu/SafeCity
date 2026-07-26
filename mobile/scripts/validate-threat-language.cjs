@@ -26,6 +26,30 @@ const {
 } = threatModule.exports;
 const phrases = Object.values(THREAT_PHRASES);
 
+const loudnessSourcePath = path.join(
+  projectRoot,
+  'src/inference/voiceTriggerLoudness.ts',
+);
+const loudnessSource = fs.readFileSync(loudnessSourcePath, 'utf8');
+const compiledLoudness = ts.transpileModule(loudnessSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+  },
+  fileName: loudnessSourcePath,
+});
+const loudnessModule = { exports: {} };
+new Function('require', 'module', 'exports', compiledLoudness.outputText)(
+  require,
+  loudnessModule,
+  loudnessModule.exports,
+);
+const {
+  emergencyKeywordPassesLoudnessGate,
+  HELP_BACHAO_LOUDNESS_WINDOW_MS,
+  HELP_BACHAO_MIN_RMS,
+} = loudnessModule.exports;
+
 assert.equal(phrases.length, 13);
 assert.deepEqual(
   [...new Set(phrases.map((phrase) => phrase.language))].sort(),
@@ -35,6 +59,52 @@ assert.ok(THREAT_PHRASES.THREAT_DONT_SHOUT);
 assert.ok(THREAT_PHRASES.THREAT_GIVE_PHONE);
 assert.ok(THREAT_PHRASES.THREAT_PHONE_DE_DO);
 assert.ok(THREAT_PHRASES.THREAT_PHONE_DAO);
+
+assert.ok(HELP_BACHAO_MIN_RMS >= 0.05);
+assert.ok(HELP_BACHAO_MIN_RMS <= 0.1);
+assert.ok(HELP_BACHAO_LOUDNESS_WINDOW_MS >= 1_000);
+assert.ok(HELP_BACHAO_LOUDNESS_WINDOW_MS <= 2_000);
+assert.equal(
+  emergencyKeywordPassesLoudnessGate('HELP', HELP_BACHAO_MIN_RMS - 0.001),
+  false,
+);
+assert.equal(
+  emergencyKeywordPassesLoudnessGate('BACHAO', HELP_BACHAO_MIN_RMS - 0.001),
+  false,
+);
+assert.equal(
+  emergencyKeywordPassesLoudnessGate('HELP', HELP_BACHAO_MIN_RMS),
+  true,
+);
+assert.equal(
+  emergencyKeywordPassesLoudnessGate('BACHAO', HELP_BACHAO_MIN_RMS + 0.001),
+  true,
+);
+for (const keyword of ['SOS', 'EMERGENCY', 'SAVE_ME']) {
+  assert.equal(emergencyKeywordPassesLoudnessGate(keyword, 0), true);
+}
+
+const nativeVoiceService = fs.readFileSync(
+  path.join(
+    projectRoot,
+    'modules/safecity-voice-trigger/android/src/main/java/com/safecity/voicetrigger/SafeCityVoiceTriggerService.kt',
+  ),
+  'utf8',
+);
+const nativeMinimumRms = Number(
+  nativeVoiceService.match(/HELP_BACHAO_MIN_RMS\s*=\s*([0-9.]+)/)?.[1],
+);
+const nativeWindowMs = Number(
+  nativeVoiceService
+    .match(/EMERGENCY_LOUDNESS_WINDOW_MS\s*=\s*([0-9_]+)L/)?.[1]
+    ?.replaceAll('_', ''),
+);
+assert.equal(nativeMinimumRms, HELP_BACHAO_MIN_RMS);
+assert.equal(nativeWindowMs, HELP_BACHAO_LOUDNESS_WINDOW_MS);
+assert.match(
+  nativeVoiceService,
+  /LOUDNESS_GATED_KEYWORDS\s*=\s*setOf\("HELP",\s*"BACHAO"\)/,
+);
 
 const now = 100_000;
 const singleThreat = scoreThreatLanguageSignal({
@@ -125,7 +195,10 @@ console.log(
         phrases: phrases.length,
       },
       policy: {
-        directEmergencyKeywordsRemainImmediate: true,
+        helpAndBachaoRequireRaisedVoice: true,
+        softHelpStartsSos: false,
+        softBachaoStartsSos: false,
+        explicitEmergencyKeywordsRemainImmediate: true,
         singleThreatStartsSos: false,
         repeatedThreatWithoutPhysicalEvidenceStartsSos: false,
         repeatedThreatWithPhysicalEvidenceStartsSos: true,

@@ -10,6 +10,9 @@ export interface PersistentVoiceTriggerState {
   listening: boolean;
   motionMonitoring: boolean;
   detectionPending: boolean;
+  pendingDetectionSource: string | null;
+  pendingDetectionLabel: string | null;
+  pendingDetectionStartedAt: number | null;
   voiceResumeRequired: boolean;
   fullScreenAllowed: boolean;
 }
@@ -21,8 +24,8 @@ export interface PersistentVoiceTriggerStartResult {
 }
 
 type SafeCityVoiceTriggerEvents = {
-  onKeywordDetected(event: { keyword: string }): void;
-  onSafetyDetected(event: { source: string; label: string }): void;
+  onKeywordDetected(event: { keyword: string; startedAt?: number }): void;
+  onSafetyDetected(event: { source: string; label: string; startedAt: number }): void;
 };
 
 declare class SafeCityVoiceTriggerModule extends NativeModule<SafeCityVoiceTriggerEvents> {
@@ -36,6 +39,7 @@ declare class SafeCityVoiceTriggerModule extends NativeModule<SafeCityVoiceTrigg
   stopAsync(): Promise<void>;
   setListeningAsync(listenNow: boolean): Promise<void>;
   rearmAsync(): Promise<void>;
+  acknowledgeDetectionAsync(): Promise<void>;
   getStateAsync(): Promise<PersistentVoiceTriggerState>;
   openFullScreenIntentSettingsAsync(): Promise<void>;
 }

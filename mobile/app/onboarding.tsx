@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   AppState,
   KeyboardAvoidingView,
   Linking,
@@ -14,11 +15,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ActionButton } from '@/components/ActionButton';
-import { Card } from '@/components/Card';
-import { Screen } from '@/components/Screen';
+import { BrandLogo } from '@/components/BrandLogo';
 import { addContact, listContacts, readSettings, writeSettings } from '@/db/repository';
 import { useLocalization } from '@/i18n/localization-provider';
 import {
@@ -39,20 +38,21 @@ import {
   enableVoiceTrigger,
   openVoiceTriggerOverlaySettings,
 } from '@/services/persistent-voice-trigger';
-import { colors, radii, spacing, type } from '@/theme/tokens';
 import type { EmergencyContact } from '@/types/domain';
+
+type SetupStep = 1 | 2 | 3;
 
 export default function OnboardingScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const monitoring = useMonitoring();
   const { t } = useLocalization();
-  const insets = useSafeAreaInsets();
   const consentItems = [t('onboarding.consentOne'), t('onboarding.consentTwo'), t('onboarding.consentThree')];
   const legalItems = [t('onboarding.legalOne'), t('onboarding.legalTwo'), t('onboarding.legalThree')];
+  const [currentStep, setCurrentStep] = useState<SetupStep>(1);
   const [consents, setConsents] = useState([false, false, false]);
   const [legalAcceptances, setLegalAcceptances] = useState([false, false, false]);
-  const [consentVisible, setConsentVisible] = useState(false);
+  const [setupComplete, setSetupComplete] = useState(false);
   const [permissionsRequested, setPermissionsRequested] = useState(false);
   const [permissionSummary, setPermissionSummary] = useState(() => t('onboarding.notReviewed'));
   const [permissionSnapshot, setPermissionSnapshot] = useState<PermissionSnapshot | null>(null);
@@ -126,6 +126,9 @@ export default function OnboardingScreen() {
     () => permissionsComplete && consentComplete && contacts.length > 0,
     [consentComplete, contacts.length, permissionsComplete],
   );
+  const hasContactDraft = name.trim().length > 0 || phone.trim().length > 0;
+  const newContactReady = name.trim().length > 0 && phone.trim().length >= 5;
+  const canContinueContact = newContactReady || (contacts.length > 0 && !hasContactDraft);
 
   const permissionGuidance = [
     {
@@ -199,11 +202,15 @@ export default function OnboardingScreen() {
   };
 
   const openLegalDocument = (path: '/legal/privacy' | '/legal/terms') => {
-    setConsentVisible(false);
     router.push(path);
   };
 
-  const addNewContact = async () => {
+  const continueFromContact = async () => {
+    if (contacts.length > 0 && !hasContactDraft) {
+      setCurrentStep(3);
+      return;
+    }
+
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
     if (!cleanName) {
@@ -222,7 +229,7 @@ export default function OnboardingScreen() {
       setName('');
       setPhone('');
       await refreshContacts();
-      setConsentVisible(true);
+      setCurrentStep(3);
     } catch {
       setContactError(t('onboarding.contactSaveError'));
     } finally {
@@ -271,7 +278,7 @@ export default function OnboardingScreen() {
         adultConfirmed: true,
       });
       await monitoring.startMonitoring();
-      router.replace('/(tabs)');
+      setSetupComplete(true);
     } catch (error) {
       setPermissionError(
         error instanceof Error
@@ -284,514 +291,934 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <>
-      <Screen eyebrow={t('onboarding.eyebrow')} title={t('onboarding.title')}>
-        <View style={styles.intro}>
-          <Text style={styles.hero}>{t('onboarding.hero')}</Text>
-          <Text style={styles.body}>
-            {t('onboarding.body')}
-          </Text>
-          <View style={styles.progressRow}>
-            <StepPill label={t('onboarding.sensors')} complete={permissionsComplete} />
-            <StepPill label={t('onboarding.contact')} complete={contacts.length > 0} />
-            <StepPill label={t('onboarding.consent')} complete={consentComplete} />
-          </View>
-        </View>
-
-        <Text style={styles.sectionLabel}>{t('onboarding.stepSensors')}</Text>
-        <Card title={t('onboarding.accessTitle')} subtitle={t('onboarding.accessDetail')}>
-          <View style={styles.locationCallout}>
-            <Text style={styles.locationTitle}>{t('onboarding.locationTitle')}</Text>
-            <Text style={styles.locationBody}>
-              {t('onboarding.locationBody')}
-            </Text>
-          </View>
-          <View style={styles.cardAction}>
-            <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>{t('onboarding.currentStatus')}</Text>
-              <Text style={[styles.status, permissionsComplete && styles.statusReady]}>
-                {permissionSummary}
-              </Text>
-            </View>
-            {permissionsRequested && missingPermissions.length > 0 ? (
-              <View accessibilityRole="alert" style={styles.permissionGuide}>
-                <Text style={styles.permissionGuideTitle}>
-                  {t('onboarding.permissionsMissingTitle')}
-                </Text>
-                {missingPermissions.map(({ key, title, instruction }) => (
-                  <View key={key} style={styles.permissionGuideRow}>
-                    <Text style={styles.permissionGuideMark}>!</Text>
-                    <View style={styles.permissionGuideCopy}>
-                      <Text style={styles.permissionGuideName}>{title}</Text>
-                      <Text style={styles.permissionGuideInstruction}>{instruction}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-            <ActionButton
-              label={permissionsRequested ? t('onboarding.reviewPermissions') : t('onboarding.choosePermissions')}
-              onPress={() => void requestPermissions()}
-              variant="secondary"
-              loading={permissionsBusy}
-            />
-            {permissionsRequested && missingPermissions.length > 0 ? (
-              <ActionButton
-                label={t('onboarding.openPhoneSettings')}
-                onPress={() => void openPermissionSettings()}
-                variant="secondary"
-              />
-            ) : null}
-          </View>
-        </Card>
-
-        <Text style={styles.sectionLabel}>{t('onboarding.stepContact')}</Text>
-        <Card
-          title={t('onboarding.contactTitle')}
-          subtitle={t('onboarding.contactDetail')}
-        >
-          <View style={styles.form}>
-            <View>
-              <Text style={styles.inputLabel}>{t('onboarding.contactName')}</Text>
-              <TextInput
-                accessibilityLabel="Emergency contact name"
-                autoCapitalize="words"
-                placeholder={t('onboarding.contactNamePlaceholder')}
-                placeholderTextColor={colors.textMuted}
-                value={name}
-                onChangeText={(value) => {
-                  setName(value);
-                  setContactError('');
-                }}
-                style={styles.input}
-              />
-            </View>
-            <View>
-              <Text style={styles.inputLabel}>{t('onboarding.phone')}</Text>
-              <TextInput
-                accessibilityLabel="Emergency contact phone number"
-                placeholder={t('onboarding.phonePlaceholder')}
-                placeholderTextColor={colors.textMuted}
-                keyboardType="phone-pad"
-                textContentType="telephoneNumber"
-                value={phone}
-                onChangeText={(value) => {
-                  setPhone(value);
-                  setContactError('');
-                }}
-                onSubmitEditing={() => void addNewContact()}
-                style={styles.input}
-              />
-            </View>
-            {contactError ? (
-              <Text accessibilityRole="alert" style={styles.errorText}>{contactError}</Text>
-            ) : null}
-            <ActionButton
-              label={t('onboarding.saveContact')}
-              onPress={() => void addNewContact()}
-              variant="secondary"
-              loading={contactBusy}
-            />
-          </View>
-
-          {contacts.length > 0 ? (
-            <View style={styles.savedContacts}>
-              <Text style={styles.savedHeading}>{t('onboarding.readyForSos')}</Text>
-              {contacts.map((contact) => (
-                <View key={contact.id} style={styles.contactRow}>
-                  <View style={styles.contactAvatar}>
-                    <Text style={styles.contactInitial}>{contact.name.slice(0, 1).toUpperCase()}</Text>
-                  </View>
-                  <View style={styles.contactCopy}>
-                    <Text style={styles.contactName}>{contact.name}</Text>
-                    <Text style={styles.contactPhone}>{contact.phone}</Text>
-                  </View>
-                  <Text style={styles.readyBadge}>{t('onboarding.saved')}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </Card>
-
-        <Text style={styles.sectionLabel}>{t('onboarding.stepConsent')}</Text>
-        <Card>
-          <View style={styles.consentSummary}>
-            <View style={[styles.summaryIcon, consentComplete && styles.summaryIconComplete]}>
-              <Text style={styles.summaryIconText}>{consentComplete ? '✓' : '3'}</Text>
-            </View>
-            <View style={styles.summaryCopy}>
-              <Text style={styles.summaryTitle}>{consentComplete ? t('onboarding.consentConfirmed') : t('onboarding.finalConfirmation')}</Text>
-              <Text style={styles.summaryBody}>
-                {contacts.length > 0
-                  ? t('onboarding.consentReadyBody')
-                  : t('onboarding.consentLockedBody')}
-              </Text>
-            </View>
-          </View>
-          {contacts.length > 0 ? (
-            <View style={styles.cardAction}>
-              <ActionButton
-                label={consentComplete ? t('onboarding.reviewConsent') : t('onboarding.reviewConfirm')}
-                onPress={() => setConsentVisible(true)}
-                variant="secondary"
-              />
-            </View>
-          ) : null}
-        </Card>
-
-        <View style={styles.finish}>
-          {permissionError ? (
-            <Text accessibilityRole="alert" style={styles.errorText}>{permissionError}</Text>
-          ) : null}
-          <ActionButton
-            label={t('onboarding.finish')}
-            onPress={() => void finish()}
-            disabled={!canFinish}
-            loading={finishBusy}
-          />
-          {!canFinish ? (
-            <Text style={styles.hint}>
-              {permissionsComplete
-                ? t('onboarding.finishHint')
-                : t('onboarding.finishPermissionsHint')}
-            </Text>
-          ) : (
-            <Text style={styles.readyHint}>{t('onboarding.ready')}</Text>
-          )}
-        </View>
-      </Screen>
-
-      <Modal
-        transparent
-        visible={consentVisible}
-        onRequestClose={() => setConsentVisible(false)}
+    <SafeAreaView style={styles.root}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.root}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalRoot}
+        <ScrollView
+          contentContainerStyle={styles.page}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <Pressable
-            accessibilityLabel="Close consent confirmation"
-            onPress={() => setConsentVisible(false)}
-            style={styles.backdrop}
-          />
-          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
-            <View style={styles.sheetHandle} />
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.sheetEyebrow}>{t('onboarding.finalStep')}</Text>
-              <Text style={styles.sheetTitle}>{t('onboarding.understandTitle')}</Text>
-              <Text style={styles.sheetBody}>
-                {t('onboarding.understandBody')}
-              </Text>
-
-              {!legalConfigurationComplete ? (
-                <View accessibilityRole="alert" style={styles.legalWarning}>
-                  <Text style={styles.legalWarningTitle}>{t('onboarding.prototypeTitle')}</Text>
-                  <Text style={styles.legalWarningBody}>
-                    {t('onboarding.prototypeBody')}
-                  </Text>
+          <View style={styles.setupContainer}>
+            <View style={styles.setupHeader}>
+              <View style={styles.headerTitleRow}>
+                <View style={styles.headerCopy}>
+                  <Text style={styles.headerMeta}>{t('onboarding.eyebrow')}</Text>
+                  <Text style={styles.setupTitle}>{t('onboarding.title')}</Text>
                 </View>
-              ) : null}
-
-              <View style={styles.legalLinks}>
-                <Pressable
-                  accessibilityRole="link"
-                  onPress={() => openLegalDocument('/legal/privacy')}
-                  style={styles.legalLinkButton}
-                >
-                  <Text style={styles.legalLinkText}>{t('onboarding.readPrivacy')}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="link"
-                  onPress={() => openLegalDocument('/legal/terms')}
-                  style={styles.legalLinkButton}
-                >
-                  <Text style={styles.legalLinkText}>{t('onboarding.readTerms')}</Text>
-                </Pressable>
+                <View style={styles.logoBadge}>
+                  <BrandLogo size={50} />
+                </View>
               </View>
-
-              <View style={styles.consentList}>
-                {consentItems.map((item, index) => (
-                  <Pressable
-                    key={item}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: consents[index] }}
-                    onPress={() =>
-                      setConsents((current) =>
-                        current.map((value, itemIndex) => (itemIndex === index ? !value : value)),
-                      )
-                    }
-                    style={({ pressed }) => [styles.consentRow, pressed && styles.consentRowPressed]}
-                  >
-                    <View style={[styles.checkbox, consents[index] && styles.checkboxChecked]}>
-                      <Text style={styles.check}>{consents[index] ? '✓' : ''}</Text>
-                    </View>
-                    <Text style={styles.consentText}>{item}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={styles.legalHeading}>{t('onboarding.ageLegal')}</Text>
-              <View style={styles.consentList}>
-                {legalItems.map((item, index) => (
-                  <Pressable
-                    key={item}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: legalAcceptances[index] }}
-                    onPress={() =>
-                      setLegalAcceptances((current) =>
-                        current.map((value, itemIndex) => (itemIndex === index ? !value : value)),
-                      )
-                    }
-                    style={({ pressed }) => [styles.consentRow, pressed && styles.consentRowPressed]}
-                  >
-                    <View style={[styles.checkbox, legalAcceptances[index] && styles.checkboxChecked]}>
-                      <Text style={styles.check}>{legalAcceptances[index] ? '✓' : ''}</Text>
-                    </View>
-                    <Text style={styles.consentText}>{item}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <View style={styles.sheetActions}>
-                <ActionButton
-                  label={t('onboarding.confirmConsent')}
-                  onPress={() => setConsentVisible(false)}
-                  disabled={!consentComplete}
+              <Text style={styles.stepIndicator}>
+                {t('onboarding.stepCount', { current: currentStep, total: 3 })}
+              </Text>
+              <View style={styles.tagContainer}>
+                <StepPill
+                  label={t('onboarding.sensors')}
+                  active={currentStep === 1}
+                  complete={permissionsComplete}
                 />
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setConsentVisible(false)}
-                  style={styles.notNowButton}
-                >
-                  <Text style={styles.notNowText}>{t('onboarding.notNow')}</Text>
-                </Pressable>
+                <StepPill
+                  label={t('onboarding.contact')}
+                  active={currentStep === 2}
+                  complete={contacts.length > 0}
+                />
+                <StepPill
+                  label={t('onboarding.consent')}
+                  active={currentStep === 3}
+                  complete={consentComplete}
+                />
               </View>
-            </ScrollView>
+            </View>
+
+            {currentStep === 1 ? (
+              <View style={styles.stepPage}>
+                <View style={styles.stepCard}>
+                  <View style={styles.cardHeadingGroup}>
+                    <Text style={styles.cardHeading}>{t('onboarding.accessTitle')}</Text>
+                    <Text style={styles.cardDescription}>{t('onboarding.accessDetail')}</Text>
+                  </View>
+
+                  <View style={styles.infoBox}>
+                    <Text style={styles.infoTitle}>{t('onboarding.locationTitle')}</Text>
+                    <Text style={styles.infoDescription}>{t('onboarding.locationBody')}</Text>
+                  </View>
+
+                  <View style={styles.statusCounterRow}>
+                    <Text style={styles.statusCounterTitle}>{t('onboarding.currentStatus')}</Text>
+                    <Text style={[styles.statusCounterValue, permissionsComplete && styles.successText]}>
+                      {permissionSummary}
+                    </Text>
+                  </View>
+
+                  {permissionsComplete ? (
+                    <View accessibilityRole="alert" style={styles.readyPanel}>
+                      <Text style={styles.readyPanelIcon}>✓</Text>
+                      <Text style={styles.readyPanelText}>{permissionSummary}</Text>
+                    </View>
+                  ) : (
+                    <View accessibilityRole="alert" style={styles.warningPanel}>
+                      <Text style={styles.warningHeading}>
+                        {t('onboarding.permissionsMissingTitle')}
+                      </Text>
+                      <View style={styles.permissionList}>
+                        {missingPermissions.map(({ key, title, instruction }) => (
+                          <View key={key} style={styles.permissionItem}>
+                            <View style={styles.permissionStatusDot}>
+                              <Text style={styles.permissionStatusMark}>!</Text>
+                            </View>
+                            <View style={styles.permissionCopy}>
+                              <Text style={styles.permissionName}>{title}</Text>
+                              <Text style={styles.permissionInstruction}>{instruction}</Text>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  <View style={styles.actionStack}>
+                    <WizardButton
+                      label={
+                        permissionsRequested
+                          ? t('onboarding.reviewPermissions')
+                          : t('onboarding.choosePermissions')
+                      }
+                      onPress={() => void requestPermissions()}
+                      loading={permissionsBusy}
+                    />
+                    {permissionsRequested && missingPermissions.length > 0 ? (
+                      <WizardButton
+                        label={t('onboarding.openPhoneSettings')}
+                        onPress={() => void openPermissionSettings()}
+                        variant="secondary"
+                      />
+                    ) : null}
+                  </View>
+                </View>
+
+                <WizardButton
+                  disabled={!permissionsComplete}
+                  label={`${t('onboarding.contact')}  →`}
+                  onPress={() => setCurrentStep(2)}
+                />
+              </View>
+            ) : null}
+
+            {currentStep === 2 ? (
+              <View style={styles.stepPage}>
+                <View style={styles.stepCard}>
+                  <View style={styles.cardHeadingGroup}>
+                    <Text style={styles.cardHeading}>{t('onboarding.contactTitle')}</Text>
+                    <Text style={styles.cardDescription}>{t('onboarding.contactDetail')}</Text>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('onboarding.contactName')}</Text>
+                    <TextInput
+                      accessibilityLabel="Emergency contact name"
+                      autoCapitalize="words"
+                      placeholder={t('onboarding.contactNamePlaceholder')}
+                      placeholderTextColor={palette.textDim}
+                      value={name}
+                      onChangeText={(value) => {
+                        setName(value);
+                        setContactError('');
+                      }}
+                      style={styles.textInput}
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>{t('onboarding.phone')}</Text>
+                    <TextInput
+                      accessibilityLabel="Emergency contact phone number"
+                      keyboardType="phone-pad"
+                      onChangeText={(value) => {
+                        setPhone(value);
+                        setContactError('');
+                      }}
+                      onSubmitEditing={() => void continueFromContact()}
+                      placeholder={t('onboarding.phonePlaceholder')}
+                      placeholderTextColor={palette.textDim}
+                      textContentType="telephoneNumber"
+                      value={phone}
+                      style={styles.textInput}
+                    />
+                  </View>
+
+                  {contactError ? (
+                    <Text accessibilityRole="alert" style={styles.errorText}>{contactError}</Text>
+                  ) : null}
+
+                  {contacts.length > 0 ? (
+                    <View style={styles.savedContacts}>
+                      <Text style={styles.savedHeading}>{t('onboarding.readyForSos')}</Text>
+                      {contacts.map((contact) => (
+                        <View key={contact.id} style={styles.contactRow}>
+                          <View style={styles.contactAvatar}>
+                            <Text style={styles.contactInitial}>
+                              {contact.name.slice(0, 1).toUpperCase()}
+                            </Text>
+                          </View>
+                          <View style={styles.contactCopy}>
+                            <Text style={styles.contactName}>{contact.name}</Text>
+                            <Text style={styles.contactPhone}>{contact.phone}</Text>
+                          </View>
+                          <Text style={styles.savedBadge}>{t('onboarding.saved')}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+
+                <View style={styles.buttonRow}>
+                  <WizardButton
+                    fill
+                    label={`←  ${t('common.back')}`}
+                    onPress={() => setCurrentStep(1)}
+                    variant="secondary"
+                  />
+                  <WizardButton
+                    disabled={!canContinueContact}
+                    fill
+                    label={
+                      newContactReady
+                        ? t('onboarding.saveContact')
+                        : `${t('onboarding.consent')}  →`
+                    }
+                    loading={contactBusy}
+                    onPress={() => void continueFromContact()}
+                  />
+                </View>
+              </View>
+            ) : null}
+
+            {currentStep === 3 ? (
+              <View style={styles.stepPage}>
+                <View style={styles.stepCard}>
+                  <View style={styles.cardHeadingGroup}>
+                    <Text style={styles.cardHeading}>{t('onboarding.finalConfirmation')}</Text>
+                    <Text style={styles.cardDescription}>{t('onboarding.understandBody')}</Text>
+                  </View>
+
+                  {!legalConfigurationComplete ? (
+                    <View accessibilityRole="alert" style={styles.legalWarning}>
+                      <Text style={styles.legalWarningTitle}>{t('onboarding.prototypeTitle')}</Text>
+                      <Text style={styles.legalWarningBody}>{t('onboarding.prototypeBody')}</Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.legalLinks}>
+                    <Pressable
+                      accessibilityRole="link"
+                      onPress={() => openLegalDocument('/legal/privacy')}
+                      style={({ pressed }) => [
+                        styles.legalLinkButton,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={styles.legalLinkText}>{t('onboarding.readPrivacy')}</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="link"
+                      onPress={() => openLegalDocument('/legal/terms')}
+                      style={({ pressed }) => [
+                        styles.legalLinkButton,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={styles.legalLinkText}>{t('onboarding.readTerms')}</Text>
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.consentList}>
+                    {consentItems.map((item, index) => (
+                      <ConsentRow
+                        checked={Boolean(consents[index])}
+                        key={item}
+                        label={item}
+                        onPress={() =>
+                          setConsents((current) =>
+                            current.map((value, itemIndex) =>
+                              itemIndex === index ? !value : value,
+                            ),
+                          )
+                        }
+                      />
+                    ))}
+                  </View>
+
+                  <Text style={styles.legalHeading}>{t('onboarding.ageLegal')}</Text>
+                  <View style={styles.consentList}>
+                    {legalItems.map((item, index) => (
+                      <ConsentRow
+                        checked={Boolean(legalAcceptances[index])}
+                        key={item}
+                        label={item}
+                        onPress={() =>
+                          setLegalAcceptances((current) =>
+                            current.map((value, itemIndex) =>
+                              itemIndex === index ? !value : value,
+                            ),
+                          )
+                        }
+                      />
+                    ))}
+                  </View>
+                </View>
+
+                {permissionError ? (
+                  <Text accessibilityRole="alert" style={styles.errorText}>{permissionError}</Text>
+                ) : null}
+                <View style={styles.buttonRow}>
+                  <WizardButton
+                    fill
+                    label={`←  ${t('common.back')}`}
+                    onPress={() => setCurrentStep(2)}
+                    variant="secondary"
+                  />
+                  <WizardButton
+                    disabled={!canFinish}
+                    fill
+                    label={t('onboarding.finish')}
+                    loading={finishBusy}
+                    onPress={() => void finish()}
+                  />
+                </View>
+              </View>
+            ) : null}
+
+            <Text style={[styles.bottomHint, canFinish && styles.successText]}>
+              {canFinish
+                ? t('onboarding.ready')
+                : permissionsComplete
+                  ? t('onboarding.finishHint')
+                  : t('onboarding.finishPermissionsHint')}
+            </Text>
           </View>
-        </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      <Modal animationType="fade" transparent visible={setupComplete}>
+        <SafeAreaView style={styles.celebrationOverlay}>
+          <View style={styles.celebrationCard}>
+            <BrandLogo size={88} />
+            <Text style={styles.celebrationTitle}>{t('onboarding.activeTitle')}</Text>
+            <Text style={styles.celebrationBody}>{t('onboarding.ready')}</Text>
+            <WizardButton
+              label={`${t('onboarding.openDashboard')}  →`}
+              onPress={() => router.replace('/(tabs)')}
+            />
+          </View>
+        </SafeAreaView>
       </Modal>
-    </>
+    </SafeAreaView>
   );
 }
 
-function StepPill({ label, complete }: { label: string; complete: boolean }) {
+function StepPill({
+  label,
+  active,
+  complete,
+}: {
+  label: string;
+  active: boolean;
+  complete: boolean;
+}) {
   return (
-    <View style={[styles.stepPill, complete && styles.stepPillComplete]}>
-      <Text style={[styles.stepPillText, complete && styles.stepPillTextComplete]}>
+    <View
+      style={[
+        styles.stepPill,
+        complete && styles.stepPillComplete,
+        active && styles.stepPillActive,
+      ]}
+    >
+      <Text
+        style={[
+          styles.stepPillText,
+          complete && styles.stepPillTextComplete,
+          active && styles.stepPillTextActive,
+        ]}
+      >
         {complete ? '✓ ' : ''}{label}
       </Text>
     </View>
   );
 }
 
+function ConsentRow({
+  checked,
+  label,
+  onPress,
+}: {
+  checked: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.consentRow, pressed && styles.pressed]}
+    >
+      <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+        <Text style={styles.check}>{checked ? '✓' : ''}</Text>
+      </View>
+      <Text style={styles.consentText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function WizardButton({
+  disabled = false,
+  fill = false,
+  label,
+  loading = false,
+  onPress,
+  variant = 'primary',
+}: {
+  disabled?: boolean;
+  fill?: boolean;
+  label: string;
+  loading?: boolean;
+  onPress: () => void;
+  variant?: 'primary' | 'secondary';
+}) {
+  const unavailable = disabled || loading;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: unavailable, busy: loading }}
+      disabled={unavailable}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.button,
+        variant === 'primary' ? styles.buttonPrimary : styles.buttonSecondary,
+        fill && styles.buttonFill,
+        unavailable && styles.buttonDisabled,
+        pressed && !unavailable && styles.pressed,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={variant === 'primary' ? palette.white : palette.emerald} />
+      ) : (
+        <Text
+          numberOfLines={2}
+          style={[
+            styles.buttonText,
+            variant === 'primary' ? styles.buttonPrimaryText : styles.buttonSecondaryText,
+          ]}
+        >
+          {label}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+const palette = {
+  background: '#05080E',
+  card: '#0F131A',
+  input: 'rgba(0, 0, 0, 0.25)',
+  border: 'rgba(255, 255, 255, 0.07)',
+  borderStrong: 'rgba(255, 255, 255, 0.13)',
+  emerald: '#10B981',
+  emeraldSoft: 'rgba(16, 185, 129, 0.08)',
+  emeraldBorder: 'rgba(16, 185, 129, 0.30)',
+  crimson: '#EF4444',
+  crimsonSoft: 'rgba(239, 68, 68, 0.05)',
+  crimsonBorder: 'rgba(239, 68, 68, 0.30)',
+  amber: '#F59E0B',
+  text: '#F8FAFC',
+  textMuted: '#94A3B8',
+  textDim: '#64748B',
+  white: '#FFFFFF',
+};
+
 const styles = StyleSheet.create({
-  intro: { marginBottom: spacing.lg },
-  hero: { color: colors.text, fontSize: 30, lineHeight: 36, fontWeight: '800' },
-  body: { color: colors.textMuted, fontSize: type.body, lineHeight: 23, marginTop: spacing.sm },
-  progressRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg },
-  stepPill: {
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
+  root: {
+    flex: 1,
+    backgroundColor: palette.background,
   },
-  stepPillComplete: { borderColor: colors.safe, backgroundColor: colors.safeSoft },
-  stepPillText: { color: colors.textMuted, fontSize: type.caption, fontWeight: '700' },
-  stepPillTextComplete: { color: colors.safe },
-  sectionLabel: {
-    color: colors.textMuted,
-    fontWeight: '800',
-    fontSize: type.caption,
-    textTransform: 'uppercase',
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+  page: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 26,
+    paddingBottom: 32,
   },
-  locationCallout: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.watch,
-    backgroundColor: colors.surfaceRaised,
-    borderRadius: radii.sm,
-    padding: spacing.md,
-    marginTop: spacing.md,
+  setupContainer: {
+    width: '100%',
+    maxWidth: 600,
+    alignSelf: 'center',
+    gap: 24,
   },
-  locationTitle: { color: colors.text, fontSize: type.body, fontWeight: '800' },
-  locationBody: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18, marginTop: spacing.xs },
-  cardAction: { gap: spacing.md, marginTop: spacing.md },
-  statusRow: { gap: spacing.xs },
-  statusLabel: { color: colors.textMuted, fontSize: type.caption, fontWeight: '700' },
-  status: { color: colors.text, fontSize: type.body, fontWeight: '700' },
-  statusReady: { color: colors.safe },
-  permissionGuide: {
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.dangerBorder,
-    borderRadius: radii.md,
-    backgroundColor: colors.dangerSoft,
-    padding: spacing.md,
+  setupHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+    paddingBottom: 20,
   },
-  permissionGuideTitle: {
-    color: colors.danger,
-    fontSize: type.body,
-    fontWeight: '900',
-  },
-  permissionGuideRow: {
+  headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: spacing.sm,
+    gap: 16,
   },
-  permissionGuideMark: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+  headerCopy: {
+    flex: 1,
+  },
+  headerMeta: {
+    color: palette.emerald,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  setupTitle: {
+    color: palette.white,
+    fontSize: 29,
+    lineHeight: 35,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  logoBadge: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
-    textAlign: 'center',
-    color: colors.white,
-    backgroundColor: colors.danger,
+    backgroundColor: palette.white,
+  },
+  stepIndicator: {
+    color: palette.emerald,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginTop: 8,
+  },
+  tagContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  stepPill: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
+  stepPillActive: {
+    backgroundColor: palette.emeraldSoft,
+    borderColor: palette.emeraldBorder,
+  },
+  stepPillComplete: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  stepPillText: {
+    color: palette.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  stepPillTextActive: {
+    color: palette.emerald,
+  },
+  stepPillTextComplete: {
+    color: palette.white,
+  },
+  stepPage: {
+    gap: 16,
+  },
+  stepCard: {
+    gap: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.card,
+    padding: 24,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  cardHeadingGroup: {
+    gap: 8,
+  },
+  cardHeading: {
+    color: palette.white,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: '800',
+  },
+  cardDescription: {
+    color: palette.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  infoBox: {
+    gap: 5,
+    borderLeftWidth: 3,
+    borderLeftColor: palette.emerald,
+    borderRadius: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.03)',
+    padding: 14,
+  },
+  infoTitle: {
+    color: palette.white,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  infoDescription: {
+    color: palette.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  statusCounterRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  statusCounterTitle: {
+    color: palette.textDim,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  statusCounterValue: {
+    flex: 1,
+    color: palette.white,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  warningPanel: {
+    gap: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: palette.crimsonBorder,
+    backgroundColor: palette.crimsonSoft,
+    padding: 17,
+  },
+  warningHeading: {
+    color: palette.crimson,
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: '900',
   },
-  permissionGuideCopy: { flex: 1 },
-  permissionGuideName: { color: colors.text, fontSize: type.caption, fontWeight: '800' },
-  permissionGuideInstruction: {
-    color: colors.textMuted,
-    fontSize: type.caption,
+  permissionList: {
+    gap: 10,
+  },
+  permissionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    minHeight: 58,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.input,
+    padding: 12,
+  },
+  permissionStatusDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.crimson,
+  },
+  permissionStatusMark: {
+    color: palette.white,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  permissionCopy: {
+    flex: 1,
+  },
+  permissionName: {
+    color: palette.white,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  permissionInstruction: {
+    color: palette.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  readyPanel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: palette.emeraldBorder,
+    backgroundColor: palette.emeraldSoft,
+    padding: 16,
+  },
+  readyPanelIcon: {
+    color: palette.emerald,
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  readyPanelText: {
+    flex: 1,
+    color: palette.emerald,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  actionStack: {
+    gap: 10,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  button: {
+    minHeight: 50,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  buttonFill: {
+    flex: 1,
+  },
+  buttonPrimary: {
+    borderWidth: 1,
+    borderColor: palette.emerald,
+    backgroundColor: palette.emerald,
+  },
+  buttonSecondary: {
+    borderWidth: 1,
+    borderColor: palette.borderStrong,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  buttonDisabled: {
+    opacity: 0.3,
+  },
+  buttonText: {
+    fontSize: 13,
     lineHeight: 18,
-    marginTop: 2,
+    fontWeight: '800',
+    textAlign: 'center',
   },
-  form: { gap: spacing.md, marginTop: spacing.lg },
-  inputLabel: { color: colors.text, fontSize: type.caption, fontWeight: '700', marginBottom: spacing.xs },
-  input: {
-    minHeight: 52,
-    borderRadius: radii.md,
+  buttonPrimaryText: {
+    color: palette.white,
+  },
+  buttonSecondaryText: {
+    color: palette.white,
+  },
+  inputGroup: {
+    gap: 7,
+  },
+  inputLabel: {
+    color: palette.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  textInput: {
+    minHeight: 50,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    backgroundColor: colors.surfaceRaised,
-    paddingHorizontal: spacing.md,
-    fontSize: type.body,
+    borderColor: palette.border,
+    backgroundColor: palette.input,
+    color: palette.white,
+    fontSize: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  errorText: { color: colors.danger, fontSize: type.caption, lineHeight: 18 },
   savedContacts: {
-    marginTop: spacing.lg,
-    paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+    paddingTop: 16,
   },
-  savedHeading: { color: colors.textMuted, fontSize: type.caption, fontWeight: '800', marginBottom: spacing.sm },
-  contactRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  savedHeading: {
+    color: palette.textDim,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 9,
+  },
   contactAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.pill,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.safeSoft,
-  },
-  contactInitial: { color: colors.safe, fontWeight: '900' },
-  contactCopy: { flex: 1 },
-  contactName: { color: colors.text, fontWeight: '700' },
-  contactPhone: { color: colors.textMuted, fontSize: type.caption, marginTop: 3 },
-  readyBadge: { color: colors.safe, fontSize: type.caption, fontWeight: '800' },
-  consentSummary: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  summaryIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceRaised,
+    backgroundColor: palette.emeraldSoft,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: palette.emeraldBorder,
   },
-  summaryIconComplete: { backgroundColor: colors.safeSoft, borderColor: colors.safe },
-  summaryIconText: { color: colors.safe, fontWeight: '900', fontSize: type.heading },
-  summaryCopy: { flex: 1 },
-  summaryTitle: { color: colors.text, fontWeight: '800', fontSize: type.body },
-  summaryBody: { color: colors.textMuted, fontSize: type.caption, lineHeight: 18, marginTop: spacing.xs },
-  finish: { gap: spacing.sm, marginTop: spacing.xl },
-  hint: { color: colors.textMuted, textAlign: 'center', fontSize: type.caption, lineHeight: 18 },
-  readyHint: { color: colors.safe, textAlign: 'center', fontSize: type.caption, fontWeight: '700' },
-  modalRoot: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.68)',
+  contactInitial: {
+    color: palette.emerald,
+    fontWeight: '900',
   },
-  sheet: {
-    maxHeight: '88%',
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+  contactCopy: {
+    flex: 1,
   },
-  sheetHandle: {
-    width: 42,
-    height: 4,
-    borderRadius: radii.pill,
-    backgroundColor: colors.border,
-    alignSelf: 'center',
-    marginBottom: spacing.lg,
+  contactName: {
+    color: palette.white,
+    fontSize: 13,
+    fontWeight: '800',
   },
-  sheetEyebrow: { color: colors.watch, fontSize: type.caption, fontWeight: '800', textTransform: 'uppercase' },
-  sheetTitle: { color: colors.text, fontSize: type.title, fontWeight: '800', marginTop: spacing.xs },
-  sheetBody: { color: colors.textMuted, fontSize: type.body, lineHeight: 22, marginTop: spacing.sm },
+  contactPhone: {
+    color: palette.textMuted,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  savedBadge: {
+    color: palette.emerald,
+    fontSize: 11,
+    fontWeight: '900',
+  },
   legalWarning: {
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.alert,
-    backgroundColor: colors.alertSoft,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginTop: spacing.lg,
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    padding: 14,
   },
-  legalWarningTitle: { color: colors.alert, fontWeight: '800', fontSize: type.body },
-  legalWarningBody: { color: colors.text, fontSize: type.caption, lineHeight: 18, marginTop: spacing.xs },
-  legalLinks: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  legalWarningTitle: {
+    color: palette.amber,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  legalWarningBody: {
+    color: palette.textMuted,
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 5,
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   legalLinkButton: {
     flex: 1,
     minHeight: 46,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.watch,
-    borderRadius: radii.md,
+    borderColor: palette.emeraldBorder,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: 10,
   },
-  legalLinkText: { color: colors.watch, fontSize: type.caption, fontWeight: '800', textAlign: 'center' },
-  consentList: { gap: spacing.sm, marginTop: spacing.lg },
-  legalHeading: { color: colors.text, fontSize: type.heading, fontWeight: '800', marginTop: spacing.lg },
+  legalLinkText: {
+    color: palette.emerald,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  consentList: {
+    gap: 10,
+  },
   consentRow: {
     flexDirection: 'row',
-    gap: spacing.md,
     alignItems: 'flex-start',
-    borderRadius: radii.md,
+    gap: 11,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceRaised,
-    padding: spacing.md,
+    borderColor: palette.border,
+    backgroundColor: palette.input,
+    padding: 13,
   },
-  consentRowPressed: { opacity: 0.78 },
   checkbox: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 7,
     borderWidth: 1,
-    borderColor: colors.textMuted,
+    borderColor: palette.textDim,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxChecked: { backgroundColor: colors.safe, borderColor: colors.safe },
-  check: { color: colors.background, fontWeight: '900' },
-  consentText: { flex: 1, color: colors.text, fontSize: type.body, lineHeight: 22 },
-  sheetActions: { gap: spacing.sm, marginTop: spacing.lg },
-  notNowButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  notNowText: { color: colors.textMuted, fontSize: type.body, fontWeight: '700' },
+  checkboxChecked: {
+    borderColor: palette.emerald,
+    backgroundColor: palette.emerald,
+  },
+  check: {
+    color: palette.white,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  consentText: {
+    flex: 1,
+    color: palette.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  legalHeading: {
+    color: palette.white,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  errorText: {
+    color: palette.crimson,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  bottomHint: {
+    color: palette.textDim,
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  successText: {
+    color: palette.emerald,
+  },
+  pressed: {
+    opacity: 0.76,
+  },
+  celebrationOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(5, 8, 14, 0.97)',
+    padding: 20,
+  },
+  celebrationCard: {
+    width: '100%',
+    maxWidth: 420,
+    alignItems: 'center',
+    gap: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: palette.emeraldBorder,
+    backgroundColor: palette.card,
+    padding: 32,
+  },
+  celebrationTitle: {
+    color: palette.white,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '900',
+  },
+  celebrationBody: {
+    color: palette.textMuted,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
 });

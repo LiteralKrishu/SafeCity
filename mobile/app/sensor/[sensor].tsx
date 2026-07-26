@@ -380,6 +380,10 @@ export default function SensorDetailScreen() {
             <Text style={styles.spectrumFooterText}>ON-DEVICE · VOLATILE MEMORY ONLY</Text>
             <Text style={styles.spectrumFooterText}>UNCALIBRATED dBFS</Text>
           </View>
+          <Text style={styles.explainer}>
+            When Voice SOS is armed, shout “HELP” or “BACHAO” to open the
+            10-second SOS countdown. Soft speech is ignored.
+          </Text>
         </Card>
       ) : null}
 
@@ -395,7 +399,11 @@ export default function SensorDetailScreen() {
             <Metric label="Gyro Z" value={`${Math.round(telemetry.motion?.rotationZDegPerSecond ?? 0)} °/s`} />
             <Metric label="Angular speed" value={`${Math.round(telemetry.motion?.rotationMagnitudeDegPerSecond ?? 0)} °/s`} />
           </View>
-          <Text style={styles.explainer}>Acceleration is shown in g and gyroscope speed in degrees per second. A fall decision requires a timed low-g phase followed by impact and temporal confirmation.</Text>
+          <Text style={styles.explainer}>
+            A confirmed free-fall + impact, or strong impact + jerk + rotation,
+            opens the 10-second SOS countdown. A single small bump may only
+            change the readings.
+          </Text>
         </Card>
       ) : null}
 

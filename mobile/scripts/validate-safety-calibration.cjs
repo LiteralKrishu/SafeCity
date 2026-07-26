@@ -8,6 +8,7 @@ if (!compiledDirectory) {
 
 const {
   extractCalibratedMotionFeatures,
+  getAutomaticMotionTrigger,
   scoreCalibratedMotion,
 } = require(path.join(compiledDirectory, 'safetyCalibration.js'));
 const { conditionOutdoorAudio } = require(path.join(compiledDirectory, 'audioConditioning.js'));
@@ -66,6 +67,7 @@ const shortDropLikeBump = extractCalibratedMotionFeatures(
 );
 assert.equal(shortDropLikeBump.impactAfterFreeFall, false);
 assert.ok(scoreCalibratedMotion(shortDropLikeBump).score < 0.55);
+assert.equal(getAutomaticMotionTrigger(shortDropLikeBump), null);
 
 const fall = extractCalibratedMotionFeatures(
   motionSeries(1_600, (at) => ({
@@ -78,6 +80,17 @@ assert.equal(fall.freeFallObserved, true);
 assert.equal(fall.impactAfterFreeFall, true);
 assert.ok(fall.freeFallDurationMs >= 180);
 assert.ok(scoreCalibratedMotion(fall).score >= 0.9);
+assert.equal(getAutomaticMotionTrigger(fall)?.kind, 'fall');
+
+const violentThrow = extractCalibratedMotionFeatures(
+  motionSeries(1_000, (at) => ({
+    magnitudeG:
+      at === 460 || at === 620 ? 3.5 : at === 440 || at === 600 ? 0.9 : 1,
+    rotationDps: at >= 420 && at <= 700 ? 390 : 8,
+  })),
+);
+assert.equal(violentThrow.impactAfterFreeFall, false);
+assert.equal(getAutomaticMotionTrigger(violentThrow)?.kind, 'violent-motion');
 
 const sampleRate = 16_000;
 const windOnly = encodeAudio(sampleRate, 1, (time) => 0.16 * Math.sin(2 * Math.PI * 45 * time));
@@ -122,6 +135,7 @@ console.log(
         resting: scoreCalibratedMotion(resting).score,
         walking: scoreCalibratedMotion(walking).score,
         shortDropLikeBump: scoreCalibratedMotion(shortDropLikeBump).score,
+        violentThrow: scoreCalibratedMotion(violentThrow).score,
       },
       outdoorAudio: {
         shoutEstimatedSnrDb: Math.round(conditionedShout.metrics.estimatedSnrDb),

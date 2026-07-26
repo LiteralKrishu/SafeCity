@@ -113,12 +113,6 @@ export default function EscapeToolsScreen() {
             onPress={() => router.push('/cover-story' as Href)}
           />
           <EscapeToolCard
-            icon="123"
-            title="Discreet calculator"
-            detail="Switch to a functional ordinary calculator screen."
-            onPress={() => router.push('/calculator' as Href)}
-          />
-          <EscapeToolCard
             icon="“”"
             title={t('escape.scriptsTitle')}
             detail={t('escape.scriptsDetail')}

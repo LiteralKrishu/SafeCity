@@ -2,6 +2,7 @@ const {
   AndroidConfig,
   withAndroidColors,
   withAndroidColorsNight,
+  withAndroidManifest,
 } = require('expo/config-plugins');
 
 const lightColors = {
@@ -51,5 +52,18 @@ function applyColors(config, colors) {
 module.exports = function withSafeCityThemeColors(config) {
   config = withAndroidColors(config, (colorConfig) => applyColors(colorConfig, lightColors));
   config = withAndroidColorsNight(config, (colorConfig) => applyColors(colorConfig, darkColors));
+  config = withAndroidManifest(config, (manifestConfig) => {
+    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(
+      manifestConfig.modResults,
+    );
+    const mainActivity = application.activity?.find((activity) =>
+      activity.$['android:name']?.endsWith('.MainActivity'),
+    );
+    if (mainActivity) {
+      mainActivity.$['android:showWhenLocked'] = 'true';
+      mainActivity.$['android:turnScreenOn'] = 'true';
+    }
+    return manifestConfig;
+  });
   return config;
 };

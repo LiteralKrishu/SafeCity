@@ -13,6 +13,11 @@ import type {
 interface MonitorStore {
   sessionState: SessionState;
   sessionId: string | null;
+  stealthModeActive: boolean;
+  power: {
+    batteryLevel: number | null;
+    survivalMode: boolean;
+  };
   riskLevel: RiskLevel;
   score: number;
   latestAssessment: Assessment | null;
@@ -43,6 +48,8 @@ interface MonitorStore {
     behaviorBaseline: BehaviorBaselineTelemetry;
   };
   setSession: (state: SessionState, id?: string | null) => void;
+  setStealthModeActive: (active: boolean) => void;
+  setPower: (power: Partial<MonitorStore['power']>) => void;
   setAssessment: (assessment: Assessment) => void;
   setInferenceModelPreference: (preference: InferenceModelPreference) => void;
   setHealth: (health: Partial<SensorHealth>) => void;
@@ -62,6 +69,11 @@ const initialHealth: SensorHealth = {
 export const useMonitorStore = create<MonitorStore>((set) => ({
   sessionState: 'idle',
   sessionId: null,
+  stealthModeActive: false,
+  power: {
+    batteryLevel: null,
+    survivalMode: false,
+  },
   riskLevel: 'safe',
   score: 0,
   latestAssessment: null,
@@ -95,6 +107,8 @@ export const useMonitorStore = create<MonitorStore>((set) => ({
     },
   },
   setSession: (sessionState, sessionId) => set({ sessionState, sessionId: sessionId ?? null }),
+  setStealthModeActive: (stealthModeActive) => set({ stealthModeActive }),
+  setPower: (power) => set((state) => ({ power: { ...state.power, ...power } })),
   setAssessment: (assessment) =>
     set({
       latestAssessment: assessment,

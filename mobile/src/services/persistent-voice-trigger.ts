@@ -24,6 +24,9 @@ const UNAVAILABLE_STATE: PersistentVoiceTriggerState = {
   listening: false,
   motionMonitoring: false,
   detectionPending: false,
+  pendingDetectionSource: null,
+  pendingDetectionLabel: null,
+  pendingDetectionStartedAt: null,
   voiceResumeRequired: false,
   fullScreenAllowed: false,
 };
@@ -100,6 +103,10 @@ export async function rearmPersistentVoiceTrigger(): Promise<void> {
   await SafeCityVoiceTrigger?.rearmAsync();
 }
 
+export async function acknowledgePersistentDetection(): Promise<void> {
+  await SafeCityVoiceTrigger?.acknowledgeDetectionAsync();
+}
+
 export async function getPersistentVoiceTriggerState(): Promise<PersistentVoiceTriggerState> {
   if (!SafeCityVoiceTrigger) return UNAVAILABLE_STATE;
   try {
@@ -114,16 +121,23 @@ export async function openVoiceTriggerOverlaySettings(): Promise<void> {
 }
 
 export function addPersistentVoiceTriggerListener(
-  listener: (event: { keyword: VoiceTriggerKeyword }) => void,
+  listener: (event: { keyword: VoiceTriggerKeyword; startedAt?: number }) => void,
 ): EventSubscription | null {
   if (!SafeCityVoiceTrigger) return null;
   return SafeCityVoiceTrigger.addListener('onKeywordDetected', (event) => {
-    listener({ keyword: event.keyword as VoiceTriggerKeyword });
+    listener({
+      keyword: event.keyword as VoiceTriggerKeyword,
+      startedAt: event.startedAt,
+    });
   });
 }
 
 export function addPersistentSafetyTriggerListener(
-  listener: (event: { source: 'motion' | 'audio' | 'threat'; label: string }) => void,
+  listener: (event: {
+    source: 'motion' | 'audio' | 'threat';
+    label: string;
+    startedAt: number;
+  }) => void,
 ): EventSubscription | null {
   if (!SafeCityVoiceTrigger) return null;
   return SafeCityVoiceTrigger.addListener('onSafetyDetected', (event) => {
@@ -134,7 +148,11 @@ export function addPersistentSafetyTriggerListener(
     ) {
       return;
     }
-    listener({ source: event.source, label: event.label });
+    listener({
+      source: event.source,
+      label: event.label,
+      startedAt: event.startedAt,
+    });
   });
 }
 

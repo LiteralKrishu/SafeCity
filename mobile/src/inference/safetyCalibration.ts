@@ -43,6 +43,21 @@ export interface CalibratedMotionScore {
   score: number;
 }
 
+export interface AutomaticMotionTrigger {
+  kind: 'fall' | 'violent-motion';
+  label: string;
+}
+
+const AUTOMATIC_MOTION_THRESHOLDS = {
+  strongImpactG: 3.4,
+  fallRotationDegreesPerSecond: 149,
+  fallAngularTravelDegrees: 30,
+  violentAccelerationG: 2.8,
+  violentJerkGps: 18,
+  violentRotationDegreesPerSecond: 229,
+  violentAngularTravelDegrees: 45,
+} as const;
+
 function clip01(value: number): number {
   return Math.min(Math.max(value, 0), 1);
 }
@@ -206,4 +221,44 @@ export function scoreCalibratedMotion(
   if (acceleration >= 0.55 && jerk < 0.2 && rotation < 0.15) score *= 0.68;
 
   return { acceleration, jerk, rotation, angularTravel, score: clip01(score) };
+}
+
+/**
+ * Opens the existing SOS confirmation countdown only after independent motion
+ * measurements agree. A single impact spike is deliberately not enough.
+ */
+export function getAutomaticMotionTrigger(
+  motion: CalibratedMotionFeatures,
+): AutomaticMotionTrigger | null {
+  const fallCorroborated =
+    motion.peakAccelerationG >= AUTOMATIC_MOTION_THRESHOLDS.strongImpactG ||
+    motion.peakRotationDps >=
+      AUTOMATIC_MOTION_THRESHOLDS.fallRotationDegreesPerSecond ||
+    motion.angularTravelDegrees >=
+      AUTOMATIC_MOTION_THRESHOLDS.fallAngularTravelDegrees;
+
+  if (motion.impactAfterFreeFall && fallCorroborated) {
+    return {
+      kind: 'fall',
+      label: `Free-fall ${Math.round(motion.freeFallDurationMs)} ms followed by ${motion.peakAccelerationG.toFixed(1)}g impact`,
+    };
+  }
+
+  const violentMotionCorroborated =
+    motion.peakAccelerationG >=
+      AUTOMATIC_MOTION_THRESHOLDS.violentAccelerationG &&
+    motion.jerkRms >= AUTOMATIC_MOTION_THRESHOLDS.violentJerkGps &&
+    motion.peakRotationDps >=
+      AUTOMATIC_MOTION_THRESHOLDS.violentRotationDegreesPerSecond &&
+    motion.angularTravelDegrees >=
+      AUTOMATIC_MOTION_THRESHOLDS.violentAngularTravelDegrees;
+
+  if (violentMotionCorroborated) {
+    return {
+      kind: 'violent-motion',
+      label: 'Strong impact, jerk and rotation detected together',
+    };
+  }
+
+  return null;
 }

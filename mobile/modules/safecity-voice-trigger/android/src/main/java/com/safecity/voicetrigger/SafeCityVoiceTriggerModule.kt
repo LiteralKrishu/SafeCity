@@ -14,8 +14,8 @@ import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArraySet
 
 class SafeCityVoiceTriggerModule : Module() {
-  private var keywordObserver: ((String) -> Unit)? = null
-  private var safetyObserver: ((String, String) -> Unit)? = null
+  private var keywordObserver: ((String, Long?) -> Unit)? = null
+  private var safetyObserver: ((String, String, Long) -> Unit)? = null
 
   override fun definition() = ModuleDefinition {
     Name("SafeCityVoiceTrigger")
@@ -24,9 +24,11 @@ class SafeCityVoiceTriggerModule : Module() {
 
     OnStartObserving(KEYWORD_EVENT) {
       val weakModule = WeakReference(this@SafeCityVoiceTriggerModule)
-      val observer: (String) -> Unit = { keyword ->
+      val observer: (String, Long?) -> Unit = { keyword, startedAt ->
         try {
-          weakModule.get()?.sendEvent(KEYWORD_EVENT, mapOf("keyword" to keyword))
+          val payload = mutableMapOf<String, Any>("keyword" to keyword)
+          startedAt?.let { payload["startedAt"] = it }
+          weakModule.get()?.sendEvent(KEYWORD_EVENT, payload)
         } catch (_: Throwable) {
           // The full-screen notification remains the fallback when React is unavailable.
         }
@@ -42,11 +44,15 @@ class SafeCityVoiceTriggerModule : Module() {
 
     OnStartObserving(SAFETY_EVENT) {
       val weakModule = WeakReference(this@SafeCityVoiceTriggerModule)
-      val observer: (String, String) -> Unit = { source, label ->
+      val observer: (String, String, Long) -> Unit = { source, label, startedAt ->
         try {
           weakModule.get()?.sendEvent(
             SAFETY_EVENT,
-            mapOf("source" to source, "label" to label),
+            mapOf(
+              "source" to source,
+              "label" to label,
+              "startedAt" to startedAt,
+            ),
           )
         } catch (_: Throwable) {
           // The full-screen notification remains the fallback when React is unavailable.
@@ -128,16 +134,28 @@ class SafeCityVoiceTriggerModule : Module() {
       SafeCityVoiceTriggerService.rearm(context.applicationContext)
     }
 
+    AsyncFunction("acknowledgeDetectionAsync") {
+      SafeCityVoiceTriggerService.acknowledgeDetection(context.applicationContext)
+    }
+
     AsyncFunction("getStateAsync") {
       val appContext = context.applicationContext
       val state = SafeCityVoiceTriggerService.readPersistentState(appContext)
+      val pendingDetection =
+        SafeCityVoiceTriggerService.readPendingDetectionState(appContext)
       mapOf(
         "configured" to state.configured,
         "enabled" to state.enabled,
         "protectionEnabled" to state.protectionEnabled,
         "listening" to SafeCityVoiceTriggerService.isActivelyListening,
         "motionMonitoring" to SafeCityVoiceTriggerService.isMotionMonitoring,
-        "detectionPending" to SafeCityVoiceTriggerService.isDetectionPending,
+        "detectionPending" to (
+          SafeCityVoiceTriggerService.isDetectionPending ||
+            pendingDetection != null
+          ),
+        "pendingDetectionSource" to pendingDetection?.source,
+        "pendingDetectionLabel" to pendingDetection?.label,
+        "pendingDetectionStartedAt" to pendingDetection?.startedAtEpochMs,
         "voiceResumeRequired" to state.voiceResumeRequired,
         "fullScreenAllowed" to canUseFullScreenIntent(appContext),
       )
@@ -162,23 +180,23 @@ class SafeCityVoiceTriggerModule : Module() {
   companion object {
     private const val KEYWORD_EVENT = "onKeywordDetected"
     private const val SAFETY_EVENT = "onSafetyDetected"
-    private val observers = CopyOnWriteArraySet<(String) -> Unit>()
-    private val safetyObservers = CopyOnWriteArraySet<(String, String) -> Unit>()
+    private val observers = CopyOnWriteArraySet<(String, Long?) -> Unit>()
+    private val safetyObservers = CopyOnWriteArraySet<(String, String, Long) -> Unit>()
 
-    internal fun emitKeywordDetected(keyword: String) {
+    internal fun emitKeywordDetected(keyword: String, startedAt: Long? = null) {
       observers.forEach { observer ->
         try {
-          observer(keyword)
+          observer(keyword, startedAt)
         } catch (_: Throwable) {
           // A full-screen notification is also posted for every detection.
         }
       }
     }
 
-    internal fun emitSafetyDetected(source: String, label: String) {
+    internal fun emitSafetyDetected(source: String, label: String, startedAt: Long) {
       safetyObservers.forEach { observer ->
         try {
-          observer(source, label)
+          observer(source, label, startedAt)
         } catch (_: Throwable) {
           // A full-screen notification is also posted for every detection.
         }

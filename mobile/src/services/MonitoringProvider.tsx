@@ -49,6 +49,7 @@ import {
   recordThreatLanguageMatch,
   resetLocalSession,
 } from '@/inference/localFusion';
+import { getAutomaticMotionTrigger } from '@/inference/safetyCalibration';
 import {
   getThreatPhrase,
   isThreatPhraseKeyword,
@@ -308,6 +309,9 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   const lastMotionTelemetryAt = useRef(0);
   const lastInferenceAt = useRef(0);
   const lowPowerMode = useRef(false);
+  const systemLowPowerMode = useRef(false);
+  const batteryLevel = useRef<number | null>(null);
+  const lowBatterySurvivalMode = useRef(false);
   const latestLocation = useRef<SafeCityLocationFix | null>(null);
   const locationUpdatedAt = useRef(0);
   const appState = useRef<AppStateStatus>(AppState.currentState);
@@ -328,19 +332,28 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     async () => undefined,
   );
   const showVoiceCountdownRef = useRef<
-    (keyword: EmergencyVoiceTriggerKeyword) => Promise<void>
+    (keyword: EmergencyVoiceTriggerKeyword, startedAt?: number) => Promise<void>
   >(
     async () => undefined,
   );
   const showSafetyCountdownRef = useRef<
-    (source: 'motion' | 'audio' | 'threat', label: string) => Promise<void>
+    (
+      source: 'motion' | 'audio' | 'threat',
+      label: string,
+      startedAt?: number,
+    ) => Promise<void>
   >(async () => undefined);
   const syncPersistentVoiceTriggerRef = useRef<() => Promise<void>>(
     async () => undefined,
   );
 
   shouldAnalyzeRef.current = () => {
-    if (sensorSuspensions.current.size > 0) return false;
+    if (
+      sensorSuspensions.current.size > 0 ||
+      lowBatterySurvivalMode.current
+    ) {
+      return false;
+    }
     const motion = motionWindow.current.snapshot();
     const motionScore = calculateMotionScore(motion).score;
     const elevated = motion.impactAfterFreeFall || motionScore >= 0.35;
@@ -359,6 +372,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   const handleAudioBuffer = useCallback((buffer: AudioStreamBuffer) => {
     if (
       sensorSuspensions.current.size > 0 ||
+      lowBatterySurvivalMode.current ||
       useMonitorStore.getState().sessionState !== 'monitoring'
     ) {
       return;
@@ -530,6 +544,14 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   const syncPersistentVoiceTrigger = useCallback(async () => {
     if (!isPersistentVoiceTriggerAvailable() || !voiceTriggerEnabled.current) return;
     const state = useMonitorStore.getState();
+    if (lowBatterySurvivalMode.current) {
+      await setPersistentVoiceTriggerListening(false);
+      state.setTelemetry({
+        voiceTriggerStatus: 'disabled',
+        voiceTriggerTranscript: null,
+      });
+      return;
+    }
     const shouldListenNatively =
       !state.activeIncidentId &&
       sensorSuspensions.current.size === 0 &&
@@ -625,12 +647,21 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       const state = useMonitorStore.getState();
       if (
         sensorSuspensions.current.size > 0 ||
+        lowBatterySurvivalMode.current ||
         state.sessionState !== 'monitoring' ||
         !state.sessionId
       ) {
         return;
       }
       const motion = motionWindow.current.snapshot();
+      const automaticMotionTrigger = getAutomaticMotionTrigger(motion);
+      if (automaticMotionTrigger) {
+        await showSafetyCountdownRef.current(
+          'motion',
+          automaticMotionTrigger.label,
+        );
+        return;
+      }
       let observationToLearn: BehaviorObservation | null = null;
       const observedAt = Date.now();
       if (
@@ -759,6 +790,18 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
 
   const activateSensors = useCallback(async () => {
     const state = useMonitorStore.getState();
+    if (lowBatterySurvivalMode.current) {
+      state.setHealth({
+        microphone: 'degraded',
+        motion: 'degraded',
+        inference: 'degraded',
+      });
+      state.setTelemetry({
+        voiceTriggerStatus: 'disabled',
+        voiceTriggerTranscript: null,
+      });
+      return;
+    }
     if (isPersistentVoiceTriggerAvailable()) {
       // The visible app owns motion analysis while active. Pause the native
       // copy to avoid duplicate sensor work; onTaskRemoved and the AppState
@@ -847,6 +890,81 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     });
   }, [audioStream.stream, clearAudioSnapshotBuffer, stopVoiceTrigger]);
 
+  const applyBatteryPolicy = useCallback(
+    async (nextBatteryLevel: number | null, phoneLowPowerMode: boolean) => {
+      batteryLevel.current = nextBatteryLevel;
+      systemLowPowerMode.current = phoneLowPowerMode;
+      const survivalMode =
+        nextBatteryLevel !== null &&
+        nextBatteryLevel >= 0 &&
+        nextBatteryLevel < 0.1;
+      lowPowerMode.current = phoneLowPowerMode || survivalMode;
+      DeviceMotion.setUpdateInterval(
+        lowPowerMode.current
+          ? LOW_POWER_MOTION_INTERVAL_MS
+          : ACTIVE_MOTION_INTERVAL_MS,
+      );
+      useMonitorStore.getState().setPower({
+        batteryLevel:
+          nextBatteryLevel === null ? null : Math.round(nextBatteryLevel * 100),
+        survivalMode,
+      });
+
+      if (lowBatterySurvivalMode.current === survivalMode) return;
+      lowBatterySurvivalMode.current = survivalMode;
+
+      const state = useMonitorStore.getState();
+      if (state.sessionState !== 'monitoring') return;
+
+      if (survivalMode) {
+        deactivateSensors();
+        await setPersistentProtectionActive(false).catch(() => undefined);
+        await setPersistentVoiceTriggerListening(false).catch(() => undefined);
+        state.setHealth({
+          microphone: 'degraded',
+          motion: 'degraded',
+          inference: 'degraded',
+        });
+        state.setTelemetry({
+          voiceTriggerStatus: 'disabled',
+          voiceTriggerTranscript: null,
+        });
+        await startBackgroundLocation().catch(() =>
+          state.setHealth({ location: 'degraded' }),
+        );
+        await refreshLocation(true);
+        return;
+      }
+
+      await enablePersistentProtection();
+      state.setHealth({ inference: 'checking' });
+      if (
+        appState.current === 'active' &&
+        !state.activeIncidentId &&
+        sensorSuspensions.current.size === 0
+      ) {
+        const [, preparation] = await Promise.all([
+          activateSensors(),
+          initializeOnDeviceAudio(state.inferenceModelPreference),
+        ]);
+        state.setHealth({
+          inference: preparation.fallbackUsed ? 'degraded' : 'ready',
+        });
+      } else {
+        await setPersistentProtectionActive(
+          !state.activeIncidentId && sensorSuspensions.current.size === 0,
+        );
+        await syncPersistentVoiceTrigger();
+      }
+    },
+    [
+      activateSensors,
+      deactivateSensors,
+      refreshLocation,
+      syncPersistentVoiceTrigger,
+    ],
+  );
+
   const startMonitoring = useCallback(async () => {
     const state = useMonitorStore.getState();
     if (state.sessionState !== 'idle') return;
@@ -872,17 +990,29 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       settings = { ...settings, monitoringEnabled: true };
       await writeSettings(db, settings);
     }
-    await enablePersistentProtection();
+    if (!lowBatterySurvivalMode.current) {
+      await enablePersistentProtection();
+    }
     state.setInferenceModelPreference(settings.inferenceModel);
     const id = await startSession(db);
     state.setSession('monitoring', id);
-    state.setHealth({ inference: 'checking' });
+    state.setHealth({
+      inference: lowBatterySurvivalMode.current ? 'degraded' : 'checking',
+    });
     clearAudioSnapshotBuffer();
     lastInferenceAt.current = Date.now();
     lastAudioAt.current = Date.now();
-    const modelReady = initializeOnDeviceAudio(settings.inferenceModel);
-    const [, preparation] = await Promise.all([activateSensors(), modelReady]);
-    state.setHealth({ inference: preparation.fallbackUsed ? 'degraded' : 'ready' });
+    if (lowBatterySurvivalMode.current) {
+      state.setHealth({ microphone: 'degraded', motion: 'degraded' });
+      state.setTelemetry({
+        voiceTriggerStatus: 'disabled',
+        voiceTriggerTranscript: null,
+      });
+    } else {
+      const modelReady = initializeOnDeviceAudio(settings.inferenceModel);
+      const [, preparation] = await Promise.all([activateSensors(), modelReady]);
+      state.setHealth({ inference: preparation.fallbackUsed ? 'degraded' : 'ready' });
+    }
     void refreshLocation();
     if (settings.backgroundLocation) {
       void startBackgroundLocation().catch(() => state.setHealth({ location: 'degraded' }));
@@ -910,13 +1040,27 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     const state = useMonitorStore.getState();
     if (!state.sessionId || state.sessionState !== 'paused') return;
     await updateSession(db, state.sessionId, 'monitoring');
-    await enablePersistentProtection();
+    if (!lowBatterySurvivalMode.current) {
+      await enablePersistentProtection();
+    }
     state.setSession('monitoring', state.sessionId);
-    state.setHealth({ inference: 'checking' });
-    const modelReady = initializeOnDeviceAudio(state.inferenceModelPreference);
-    await activateSensors();
-    const preparation = await modelReady;
-    state.setHealth({ inference: preparation.fallbackUsed ? 'degraded' : 'ready' });
+    if (lowBatterySurvivalMode.current) {
+      state.setHealth({
+        microphone: 'degraded',
+        motion: 'degraded',
+        inference: 'degraded',
+      });
+      state.setTelemetry({
+        voiceTriggerStatus: 'disabled',
+        voiceTriggerTranscript: null,
+      });
+    } else {
+      state.setHealth({ inference: 'checking' });
+      const modelReady = initializeOnDeviceAudio(state.inferenceModelPreference);
+      await activateSensors();
+      const preparation = await modelReady;
+      state.setHealth({ inference: preparation.fallbackUsed ? 'degraded' : 'ready' });
+    }
     void startBackgroundLocation().catch(() => state.setHealth({ location: 'degraded' }));
   }, [activateSensors, db]);
 
@@ -927,6 +1071,14 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       if (!enabled) {
         stopVoiceTrigger();
         await disablePersistentVoiceTrigger();
+        state.setTelemetry({
+          voiceTriggerStatus: 'disabled',
+          voiceTriggerTranscript: null,
+        });
+        return;
+      }
+      if (lowBatterySurvivalMode.current) {
+        stopVoiceTrigger();
         state.setTelemetry({
           voiceTriggerStatus: 'disabled',
           voiceTriggerTranscript: null,
@@ -1067,7 +1219,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   );
 
   const showVoiceCountdown = useCallback(
-    async (keyword: EmergencyVoiceTriggerKeyword) => {
+    async (keyword: EmergencyVoiceTriggerKeyword, startedAt?: number) => {
       const state = useMonitorStore.getState();
       if (state.activeIncidentId || voiceSosBusy.current) return;
       voiceSosBusy.current = true;
@@ -1079,7 +1231,11 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       });
       router.push({
         pathname: '/sos-countdown',
-        params: { source: 'voice', keyword },
+        params: {
+          source: 'voice',
+          keyword,
+          ...(startedAt ? { startedAt: String(startedAt) } : {}),
+        },
       });
     },
     [router],
@@ -1088,7 +1244,11 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   showVoiceCountdownRef.current = showVoiceCountdown;
 
   const showSafetyCountdown = useCallback(
-    async (source: 'motion' | 'audio' | 'threat', label: string) => {
+    async (
+      source: 'motion' | 'audio' | 'threat',
+      label: string,
+      startedAt?: number,
+    ) => {
       const state = useMonitorStore.getState();
       if (state.activeIncidentId || voiceSosBusy.current) return;
       voiceSosBusy.current = true;
@@ -1096,7 +1256,11 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       await stopVoiceTriggerRecognition().catch(() => undefined);
       router.push({
         pathname: '/sos-countdown',
-        params: { source, keyword: label },
+        params: {
+          source,
+          keyword: label,
+          ...(startedAt ? { startedAt: String(startedAt) } : {}),
+        },
       });
     },
     [router],
@@ -1174,7 +1338,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
     useMonitorStore.getState().setTelemetry({ voiceTriggerTranscript: null });
     if (isPersistentVoiceTriggerAvailable()) {
       const persistentState = await getPersistentVoiceTriggerState();
-      if (persistentState.enabled) {
+      if (persistentState.enabled || persistentState.protectionEnabled) {
         await rearmPersistentVoiceTrigger();
         await syncPersistentVoiceTrigger();
       }
@@ -1387,10 +1551,16 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
           void setPersistentProtectionActive(
             state.sessionState === 'monitoring' &&
               !state.activeIncidentId &&
-              sensorSuspensions.current.size === 0,
+              sensorSuspensions.current.size === 0 &&
+              !lowBatterySurvivalMode.current,
           );
-          if (voiceTriggerEnabled.current) {
+          if (
+            voiceTriggerEnabled.current &&
+            !lowBatterySurvivalMode.current
+          ) {
             void syncPersistentVoiceTriggerRef.current();
+          } else if (lowBatterySurvivalMode.current) {
+            void setPersistentVoiceTriggerListening(false);
           }
         }
         return;
@@ -1398,7 +1568,8 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       if (
         state.sessionState === 'monitoring' &&
         !state.activeIncidentId &&
-        sensorSuspensions.current.size === 0
+        sensorSuspensions.current.size === 0 &&
+        !lowBatterySurvivalMode.current
       ) {
         void activateSensors();
       } else {
@@ -1409,7 +1580,7 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   }, [activateSensors, audioStream.stream, stopVoiceTrigger]);
 
   useEffect(() => {
-    const subscription = addPersistentVoiceTriggerListener(({ keyword }) => {
+    const subscription = addPersistentVoiceTriggerListener(({ keyword, startedAt }) => {
       if (!voiceTriggerEnabled.current) return;
       if (isThreatPhraseKeyword(keyword)) {
         const state = useMonitorStore.getState();
@@ -1424,35 +1595,48 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
       }
       void showVoiceCountdownRef.current(
         keyword as EmergencyVoiceTriggerKeyword,
+        startedAt,
       );
     });
     return () => subscription?.remove();
   }, []);
 
   useEffect(() => {
-    const subscription = addPersistentSafetyTriggerListener(({ source, label }) => {
-      void showSafetyCountdownRef.current(source, label);
+    const subscription = addPersistentSafetyTriggerListener(({ source, label, startedAt }) => {
+      void showSafetyCountdownRef.current(source, label, startedAt);
     });
     return () => subscription?.remove();
   }, []);
 
   useEffect(() => {
-    void Battery.isLowPowerModeEnabledAsync()
-      .then((enabled) => {
-        lowPowerMode.current = enabled;
-        DeviceMotion.setUpdateInterval(
-          enabled ? LOW_POWER_MOTION_INTERVAL_MS : ACTIVE_MOTION_INTERVAL_MS,
-        );
-      })
-      .catch(() => undefined);
-    const subscription = Battery.addLowPowerModeListener(({ lowPowerMode: enabled }) => {
-      lowPowerMode.current = enabled;
-      DeviceMotion.setUpdateInterval(
-        enabled ? LOW_POWER_MOTION_INTERVAL_MS : ACTIVE_MOTION_INTERVAL_MS,
+    let active = true;
+    void Promise.all([
+      Battery.getBatteryLevelAsync().catch(() => -1),
+      Battery.isLowPowerModeEnabledAsync().catch(() => false),
+    ]).then(([level, phoneLowPowerMode]) => {
+      if (!active) return;
+      void applyBatteryPolicy(level < 0 ? null : level, phoneLowPowerMode);
+    });
+
+    const levelSubscription = Battery.addBatteryLevelListener(({ batteryLevel: level }) => {
+      if (!active) return;
+      void applyBatteryPolicy(
+        level < 0 ? null : level,
+        systemLowPowerMode.current,
       );
     });
-    return () => subscription.remove();
-  }, []);
+    const lowPowerSubscription = Battery.addLowPowerModeListener(
+      ({ lowPowerMode: enabled }) => {
+        if (!active) return;
+        void applyBatteryPolicy(batteryLevel.current, enabled);
+      },
+    );
+    return () => {
+      active = false;
+      levelSubscription.remove();
+      lowPowerSubscription.remove();
+    };
+  }, [applyBatteryPolicy]);
 
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {

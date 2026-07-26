@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.ActivityOptions
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -110,6 +111,7 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
   @Volatile private var audioRecord: AudioRecord? = null
   private var powerStateReceiverRegistered = false
   private var initializationRetryDelayMs = INITIALIZATION_RETRY_MIN_MS
+  private var countdownExpiryRunnable: Runnable? = null
 
   private var modelDirectory: File? = null
   private var spotter: KeywordSpotter? = null
@@ -135,6 +137,8 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
   private var lastDistressCandidateAtElapsed = 0L
   private var lastThreatMatchAtElapsed = 0L
   private var threatMatchCount = 0
+  private var recentEmergencyRms = 0.0
+  private var recentEmergencyRmsAtElapsed = 0L
   private val outdoorNoiseConditioner = OutdoorNoiseConditioner(SAMPLE_RATE)
 
   private val retryInitialization = Runnable {
@@ -243,11 +247,14 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
           protectionEnabled = protectionEnabled,
           modelDirectoryUri = directoryUri,
         )
-        detectionPending = false
-        isDetectionPending = false
-        listenRequested = shouldListen
+        val restoredDetection = restorePendingDetectionIfNeeded()
+        if (!restoredDetection) {
+          detectionPending = false
+          isDetectionPending = false
+          listenRequested = shouldListen
+        }
         if (protectionEnabled) startMotionMonitoring()
-        if (protectionEnabled && shouldListen) startAudioLoopIfReady()
+        if (protectionEnabled && shouldListen && !restoredDetection) startAudioLoopIfReady()
         initializeModel(directoryUri)
       }
 
@@ -269,8 +276,9 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
           modelDirectoryUri = state.modelDirectoryUri,
         )
         startForegroundImmediately("Starting fall, motion and distress monitoring…")
+        val restoredDetection = restorePendingDetectionIfNeeded()
         startMotionMonitoring()
-        startAudioLoopIfReady()
+        if (!restoredDetection) startAudioLoopIfReady()
         if (enabled && !state.modelDirectoryUri.isNullOrBlank()) {
           initializeModel(state.modelDirectoryUri)
         } else {
@@ -332,6 +340,8 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
 
       ACTION_REARM -> rearmInternal()
 
+      ACTION_ACKNOWLEDGE_DETECTION -> acknowledgeDetectionInternal()
+
       ACTION_STOP -> {
         val state = readPersistentState(this)
         persistState(
@@ -387,9 +397,16 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
         enabled = state.enabled && !state.voiceResumeRequired
         protectionEnabled = state.protectionEnabled
         listenRequested = !state.voiceResumeRequired
+        startForegroundImmediately("Restoring persistent SafeCity protection…")
+        if (restorePendingDetectionIfNeeded()) {
+          if (protectionEnabled) startMotionMonitoring()
+          if (enabled && !state.modelDirectoryUri.isNullOrBlank()) {
+            initializeModel(state.modelDirectoryUri)
+          }
+          return START_STICKY
+        }
         detectionPending = false
         isDetectionPending = false
-        startForegroundImmediately("Restoring persistent SafeCity protection…")
         if (protectionEnabled) startMotionMonitoring()
         if (
           state.voiceResumeRequired &&
@@ -564,6 +581,7 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     distressAudioWindows = 0
     lastDistressCandidateAtElapsed = 0L
     resetThreatEvidence()
+    resetEmergencyLoudness()
     outdoorNoiseConditioner.reset()
     val thread = Thread({
       Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
@@ -585,6 +603,7 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
           if (read == 0) continue
           val normalized = FloatArray(read) { index -> samples[index] / 32768.0f }
           val conditioned = outdoorNoiseConditioner.process(normalized)
+          rememberEmergencyLoudness(conditioned)
           if (protectionEnabled && detectDistressAudio(conditioned)) {
             onSafetyDetected(
               source = "audio",
@@ -596,7 +615,11 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
           if (!detected.isNullOrBlank()) {
             if (isThreatKeyword(detected)) {
               onThreatPhraseDetected(detected)
+              resetEmergencyLoudness()
               if (!detectionPending) continue
+            } else if (!emergencyKeywordPassesLoudnessGate(detected)) {
+              resetEmergencyLoudness()
+              continue
             } else {
               onEmergencyKeywordDetected(detected)
             }
@@ -673,13 +696,45 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     return distressAudioWindows >= DISTRESS_REQUIRED_WINDOWS
   }
 
+  private fun rememberEmergencyLoudness(samples: FloatArray) {
+    if (samples.isEmpty()) return
+    var sumSquares = 0.0
+    samples.forEach { sample -> sumSquares += sample * sample }
+    val rms = sqrt(sumSquares / samples.size)
+    val now = SystemClock.elapsedRealtime()
+    if (
+      recentEmergencyRmsAtElapsed == 0L ||
+      now - recentEmergencyRmsAtElapsed > EMERGENCY_LOUDNESS_WINDOW_MS ||
+      rms >= recentEmergencyRms
+    ) {
+      recentEmergencyRms = rms
+      recentEmergencyRmsAtElapsed = now
+    }
+  }
+
+  private fun emergencyKeywordPassesLoudnessGate(keyword: String): Boolean {
+    if (keyword !in LOUDNESS_GATED_KEYWORDS) return true
+    val now = SystemClock.elapsedRealtime()
+    return (
+      recentEmergencyRmsAtElapsed > 0L &&
+      now - recentEmergencyRmsAtElapsed <= EMERGENCY_LOUDNESS_WINDOW_MS &&
+      recentEmergencyRms >= HELP_BACHAO_MIN_RMS
+    )
+  }
+
+  private fun resetEmergencyLoudness() {
+    recentEmergencyRms = 0.0
+    recentEmergencyRmsAtElapsed = 0L
+  }
+
   private fun onEmergencyKeywordDetected(keyword: String) {
-    beginSafetyDetection()
-    SafeCityVoiceTriggerModule.emitKeywordDetected(keyword)
+    val startedAt = beginSafetyDetection("voice", keyword)
+    SafeCityVoiceTriggerModule.emitKeywordDetected(keyword, startedAt)
     showDetectionNotification(
       source = "voice",
       label = keyword,
       title = "Emergency word detected",
+      startedAtEpochMs = startedAt,
     )
     updateForegroundNotification("Emergency word detected · SOS countdown opened")
   }
@@ -712,12 +767,13 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
         now - lastDistressCandidateAtElapsed <= THREAT_AUDIO_AGREEMENT_WINDOW_MS
     val label = threatDisplayLabel(keyword)
     if (threatMatchCount >= THREAT_REQUIRED_MATCHES && (motionAgreement || audioAgreement)) {
-      beginSafetyDetection()
-      SafeCityVoiceTriggerModule.emitSafetyDetected("threat", label)
+      val startedAt = beginSafetyDetection("threat", label)
+      SafeCityVoiceTriggerModule.emitSafetyDetected("threat", label, startedAt)
       showDetectionNotification(
         source = "threat",
         label = label,
         title = "Possible threat confirmed",
+        startedAtEpochMs = startedAt,
       )
       updateForegroundNotification("$label confirmed with another signal · SOS countdown opened")
       return
@@ -736,22 +792,73 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
 
   private fun onSafetyDetected(source: String, label: String) {
     if (!protectionEnabled || detectionPending) return
-    beginSafetyDetection()
-    SafeCityVoiceTriggerModule.emitSafetyDetected(source, label)
+    val startedAt = beginSafetyDetection(source, label)
+    SafeCityVoiceTriggerModule.emitSafetyDetected(source, label, startedAt)
     showDetectionNotification(
       source = source,
       label = label,
       title = if (source == "motion") "Possible fall detected" else "Possible distress sound",
+      startedAtEpochMs = startedAt,
     )
     updateForegroundNotification("$label · SOS countdown opened")
   }
 
-  private fun beginSafetyDetection() {
+  private fun beginSafetyDetection(source: String, label: String): Long {
+    val startedAtEpochMs = System.currentTimeMillis()
     detectionPending = true
     isDetectionPending = true
     listenRequested = false
+    persistPendingDetection(source, label, startedAtEpochMs)
+    scheduleCountdownExpiry(source, label, startedAtEpochMs)
     mainHandler.removeCallbacks(rearmAfterDetection)
     mainHandler.postDelayed(rearmAfterDetection, DETECTION_AUTO_REARM_MS)
+    return startedAtEpochMs
+  }
+
+  private fun persistPendingDetection(
+    source: String,
+    label: String,
+    startedAtEpochMs: Long,
+  ) {
+    preferences(this).edit()
+      .putString(PREF_PENDING_DETECTION_SOURCE, source)
+      .putString(PREF_PENDING_DETECTION_LABEL, label)
+      .putLong(PREF_PENDING_DETECTION_STARTED_AT, startedAtEpochMs)
+      .apply()
+  }
+
+  private fun clearPendingDetection() {
+    countdownExpiryRunnable?.let(mainHandler::removeCallbacks)
+    countdownExpiryRunnable = null
+    preferences(this).edit()
+      .remove(PREF_PENDING_DETECTION_SOURCE)
+      .remove(PREF_PENDING_DETECTION_LABEL)
+      .remove(PREF_PENDING_DETECTION_STARTED_AT)
+      .apply()
+  }
+
+  private fun scheduleCountdownExpiry(
+    source: String,
+    label: String,
+    startedAtEpochMs: Long,
+  ) {
+    countdownExpiryRunnable?.let(mainHandler::removeCallbacks)
+    val runnable = Runnable {
+      if (!detectionPending) return@Runnable
+      showDetectionNotification(
+        source = source,
+        label = label,
+        title = "SOS countdown finished",
+        startedAtEpochMs = startedAtEpochMs,
+        countdownFinished = true,
+      )
+      updateForegroundNotification("SOS countdown finished · opening SafeCity")
+    }
+    countdownExpiryRunnable = runnable
+    val delayMs = (
+      startedAtEpochMs + SOS_COUNTDOWN_MS - System.currentTimeMillis()
+    ).coerceAtLeast(0L)
+    mainHandler.postDelayed(runnable, delayMs)
   }
 
   private fun pauseListening() {
@@ -759,15 +866,52 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     stopAudioLoop()
   }
 
+  private fun restorePendingDetectionIfNeeded(): Boolean {
+    val pending = readPendingDetectionState(this) ?: return false
+    val ageMs = System.currentTimeMillis() - pending.startedAtEpochMs
+    if (ageMs < 0L || ageMs >= DETECTION_AUTO_REARM_MS) {
+      clearPendingDetection()
+      return false
+    }
+    detectionPending = true
+    isDetectionPending = true
+    listenRequested = false
+    startForegroundImmediately("Safety event detected · restoring SOS countdown")
+    showDetectionNotification(
+      source = pending.source,
+      label = pending.label,
+      title = if (ageMs >= SOS_COUNTDOWN_MS) {
+        "SOS countdown finished"
+      } else {
+        "Safety event detected"
+      },
+      startedAtEpochMs = pending.startedAtEpochMs,
+      countdownFinished = ageMs >= SOS_COUNTDOWN_MS,
+    )
+    scheduleCountdownExpiry(
+      pending.source,
+      pending.label,
+      pending.startedAtEpochMs,
+    )
+    mainHandler.removeCallbacks(rearmAfterDetection)
+    mainHandler.postDelayed(
+      rearmAfterDetection,
+      (DETECTION_AUTO_REARM_MS - ageMs).coerceAtLeast(0L),
+    )
+    return true
+  }
+
   private fun rearmInternal() {
-    if (!enabled && !protectionEnabled) return
     detectionPending = false
     isDetectionPending = false
-    listenRequested = true
     mainHandler.removeCallbacks(rearmAfterDetection)
+    clearPendingDetection()
     getSystemService(NotificationManager::class.java).cancel(DETECTION_NOTIFICATION_ID)
     getSystemService(NotificationManager::class.java).cancel(THREAT_NOTIFICATION_ID)
+    if (!enabled && !protectionEnabled) return
+    listenRequested = true
     resetThreatEvidence()
+    resetEmergencyLoudness()
     synchronized(modelLock) {
       val activeSpotter = spotter
       val activeStream = stream
@@ -781,6 +925,16 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     if (enabled || protectionEnabled) startAudioLoopIfReady()
     if (protectionEnabled) startMotionMonitoring()
     updateForegroundNotification()
+  }
+
+  private fun acknowledgeDetectionInternal() {
+    detectionPending = false
+    isDetectionPending = false
+    listenRequested = false
+    mainHandler.removeCallbacks(rearmAfterDetection)
+    clearPendingDetection()
+    getSystemService(NotificationManager::class.java).cancel(DETECTION_NOTIFICATION_ID)
+    updateForegroundNotification("SOS activated · protection paused for evidence capture")
   }
 
   private fun stopAudioLoop() {
@@ -1225,9 +1379,14 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     source: String,
     label: String,
     title: String,
+    startedAtEpochMs: Long,
+    countdownFinished: Boolean = false,
   ) {
     val deepLink = Uri.parse(
-      "safecity://sos-countdown?source=${Uri.encode(source)}&keyword=${Uri.encode(label)}",
+      "safecity://sos-countdown" +
+        "?source=${Uri.encode(source)}" +
+        "&keyword=${Uri.encode(label)}" +
+        "&startedAt=$startedAtEpochMs",
     )
     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
       data = deepLink
@@ -1247,7 +1406,13 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     val notification = NotificationCompat.Builder(this, DETECTION_CHANNEL_ID)
       .setSmallIcon(applicationInfo.icon)
       .setContentTitle(title)
-      .setContentText("$label · SOS starts in 10 seconds")
+      .setContentText(
+        if (countdownFinished) {
+          "$label · Opening SafeCity for SOS now"
+        } else {
+          "$label · SOS starts in 10 seconds"
+        },
+      )
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_ALARM)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -1260,6 +1425,38 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
       DETECTION_NOTIFICATION_ID,
       notification,
     )
+    attemptCountdownLaunch(fullScreenIntent)
+  }
+
+  private fun attemptCountdownLaunch(pendingIntent: PendingIntent) {
+    mainHandler.post {
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+          val options = ActivityOptions.makeBasic().apply {
+            pendingIntentBackgroundActivityStartMode =
+              ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+              pendingIntentCreatorBackgroundActivityStartMode =
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+            }
+          }
+          pendingIntent.send(
+            this,
+            0,
+            null,
+            null,
+            null,
+            null,
+            options.toBundle(),
+          )
+        } else {
+          pendingIntent.send()
+        }
+      } catch (_: Throwable) {
+        // Android may still restrict background launches. The high-priority
+        // full-screen notification remains visible and opens the same route.
+      }
+    }
   }
 
   private fun showThreatLanguageNotification(label: String, matchCount: Int) {
@@ -1326,6 +1523,12 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     val voiceResumeRequired: Boolean,
   )
 
+  data class PendingDetectionState(
+    val source: String,
+    val label: String,
+    val startedAtEpochMs: Long,
+  )
+
   companion object {
     private const val ACTION_START = "com.safecity.voicetrigger.START"
     private const val ACTION_STOP = "com.safecity.voicetrigger.STOP"
@@ -1335,6 +1538,8 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     private const val ACTION_SET_PROTECTION_ACTIVE =
       "com.safecity.voicetrigger.SET_PROTECTION_ACTIVE"
     private const val ACTION_REARM = "com.safecity.voicetrigger.REARM"
+    private const val ACTION_ACKNOWLEDGE_DETECTION =
+      "com.safecity.voicetrigger.ACKNOWLEDGE_DETECTION"
     private const val ACTION_RESTORE = "com.safecity.voicetrigger.RESTORE"
     private const val ACTION_RESTORE_MOTION_ONLY =
       "com.safecity.voicetrigger.RESTORE_MOTION_ONLY"
@@ -1348,6 +1553,9 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     private const val PREF_PROTECTION_ENABLED = "protectionEnabled"
     private const val PREF_MODEL_DIRECTORY = "modelDirectory"
     private const val PREF_VOICE_RESUME_REQUIRED = "voiceResumeRequired"
+    private const val PREF_PENDING_DETECTION_SOURCE = "pendingDetectionSource"
+    private const val PREF_PENDING_DETECTION_LABEL = "pendingDetectionLabel"
+    private const val PREF_PENDING_DETECTION_STARTED_AT = "pendingDetectionStartedAt"
 
     private const val LISTENER_CHANNEL_ID = "safecity-voice-listener"
     private const val DETECTION_CHANNEL_ID = "safecity-voice-detection"
@@ -1357,6 +1565,9 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     private const val THREAT_NOTIFICATION_ID = 4_603
 
     private const val SAMPLE_RATE = 16_000
+    // Keep foreground and background voice gating aligned at about -25 dBFS.
+    private const val HELP_BACHAO_MIN_RMS = 0.055
+    private const val EMERGENCY_LOUDNESS_WINDOW_MS = 1_500L
     private const val DISTRESS_RMS_THRESHOLD = 0.075
     private const val DISTRESS_ZCR_THRESHOLD = 0.045
     private const val DISTRESS_MINIMUM_CREST_FACTOR = 1.45f
@@ -1397,6 +1608,7 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     private const val TOKENS_FILE = "tokens.txt"
     private const val KEYWORDS_FILE = "keywords.txt"
 
+    private const val SOS_COUNTDOWN_MS = 10_000L
     private const val DETECTION_AUTO_REARM_MS = 120_000L
     private const val INITIALIZATION_RETRY_MIN_MS = 30_000L
     private const val INITIALIZATION_RETRY_MAX_MS = 15 * 60_000L
@@ -1416,6 +1628,7 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
       "THREAT_CHUP_KORO",
       "THREAT_MERE_FELBO",
     )
+    private val LOUDNESS_GATED_KEYWORDS = setOf("HELP", "BACHAO")
 
     private val startCallbacks = CopyOnWriteArrayList<(Result<Unit>) -> Unit>()
     @Volatile private var instance: SafeCityVoiceTriggerService? = null
@@ -1544,9 +1757,15 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
     }
 
     fun rearm(context: Context) {
-      if (!readPersistentState(context).enabled) return
+      val state = readPersistentState(context)
+      if (!state.enabled && !state.protectionEnabled) return
       if (instance == null) {
-        setListening(context, true)
+        ContextCompat.startForegroundService(
+          context,
+          Intent(context, SafeCityVoiceTriggerService::class.java).apply {
+            action = ACTION_RESTORE
+          },
+        )
       } else {
         context.startService(
           Intent(context, SafeCityVoiceTriggerService::class.java).apply {
@@ -1554,6 +1773,24 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
           },
         )
       }
+    }
+
+    fun acknowledgeDetection(context: Context) {
+      val running = instance
+      if (running == null) {
+        preferences(context).edit()
+          .remove(PREF_PENDING_DETECTION_SOURCE)
+          .remove(PREF_PENDING_DETECTION_LABEL)
+          .remove(PREF_PENDING_DETECTION_STARTED_AT)
+          .apply()
+        isDetectionPending = false
+        return
+      }
+      context.startService(
+        Intent(context, SafeCityVoiceTriggerService::class.java).apply {
+          action = ACTION_ACKNOWLEDGE_DETECTION
+        },
+      )
     }
 
     fun readPersistentState(context: Context): PersistentState {
@@ -1565,6 +1802,19 @@ class SafeCityVoiceTriggerService : Service(), SensorEventListener {
         modelDirectoryUri = prefs.getString(PREF_MODEL_DIRECTORY, null),
         voiceResumeRequired = prefs.getBoolean(PREF_VOICE_RESUME_REQUIRED, false),
       )
+    }
+
+    fun readPendingDetectionState(context: Context): PendingDetectionState? {
+      val prefs = preferences(context)
+      val source = prefs.getString(PREF_PENDING_DETECTION_SOURCE, null)
+        ?.takeIf(String::isNotBlank)
+        ?: return null
+      val label = prefs.getString(PREF_PENDING_DETECTION_LABEL, null)
+        ?.takeIf(String::isNotBlank)
+        ?: return null
+      val startedAtEpochMs = prefs.getLong(PREF_PENDING_DETECTION_STARTED_AT, 0L)
+      if (startedAtEpochMs <= 0L) return null
+      return PendingDetectionState(source, label, startedAtEpochMs)
     }
 
     internal fun restoreAfterSystemRestart(context: Context) {

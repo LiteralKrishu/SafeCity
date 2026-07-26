@@ -8,7 +8,8 @@
     "android": "eas build --platform android --profile preview",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
-    "check": "npm run check:threat-language && npm run check:behavior-baseline && tsc --noEmit && expo-doctor",
+    "check": "npm run check:threat-language && npm run check:behavior-baseline && npm run check:background-sos && tsc --noEmit && expo-doctor",
+    "check:background-sos": "node scripts/validate-background-sos.cjs",
     "check:behavior-baseline": "node scripts/validate-behavior-baseline.cjs",
     "check:threat-language": "node scripts/validate-threat-language.cjs"
   },
@@ -33,6 +34,7 @@
     "expo-sharing": "~57.0.7",
     "expo-sms": "~57.0.0",
     "expo-speech": "^57.0.1",
+    "expo-splash-screen": "~57.0.5",
     "expo-sqlite": "~57.0.1",
     "expo-status-bar": "~57.0.0",
     "expo-system-ui": "~57.0.1",

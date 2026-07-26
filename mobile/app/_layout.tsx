@@ -6,6 +6,7 @@ import { Suspense } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { BrandLogo } from '@/components/BrandLogo';
 import { DatabaseProvider } from '@/db/DatabaseProvider';
 import { LocalizationProvider } from '@/i18n/localization-provider';
 import { MonitoringProvider } from '@/services/MonitoringProvider';
@@ -16,6 +17,7 @@ import { ThemeProvider, useTheme } from '@/theme/theme-provider';
 function LoadingScreen() {
   return (
     <View style={styles.loading}>
+      <BrandLogo size={104} />
       <ActivityIndicator size="large" color={colors.safe} />
     </View>
   );
@@ -36,6 +38,7 @@ function AppStack() {
       >
         <Stack.Screen name="capture" options={{ gestureEnabled: false, presentation: 'fullScreenModal' }} />
         <Stack.Screen name="sos-countdown" options={{ gestureEnabled: false, presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="stealth-mode" options={{ animation: 'none', gestureEnabled: false, presentation: 'fullScreenModal' }} />
       </Stack>
     </>
   );
@@ -61,5 +64,11 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' },
+  loading: {
+    flex: 1,
+    gap: 20,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
