@@ -36,7 +36,7 @@ export default function DataRightsPage() {
           <Reveal className="data-rights-hero-copy">
             <Eyebrow>YOUR DATA · YOUR CONTROLS</Eyebrow>
             <h1>
-              Privacy you can <em>actually use.</em>
+              Your data stays <em>in your hands.</em>
             </h1>
             <p>
               SafeCity&apos;s most important privacy interface is the set of
