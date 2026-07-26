@@ -3,7 +3,7 @@
     "name": "SafeCity",
     "slug": "safecity",
     "scheme": "safecity",
-    "version": "2.0.0",
+    "version": "3.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/safecity-app-icon.png",
@@ -27,6 +27,7 @@
     },
     "android": {
       "package": "com.safecity.mobile",
+      "versionCode": 3,
       "allowBackup": false,
       "icon": "./assets/safecity-app-icon.png",
       "adaptiveIcon": {
@@ -46,6 +47,7 @@
         "FOREGROUND_SERVICE_SPECIAL_USE",
         "RECEIVE_BOOT_COMPLETED",
         "POST_NOTIFICATIONS",
+        "SEND_SMS",
         "USE_FULL_SCREEN_INTENT"
       ]
     },

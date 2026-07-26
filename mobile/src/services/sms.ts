@@ -14,6 +14,11 @@ interface EvidenceAttachmentSpec {
   mimeType: string;
 }
 
+export interface AutomaticSosDispatchResult {
+  requested: number;
+  evidenceAttachments: number;
+}
+
 async function readBatteryPercent(): Promise<number | null> {
   try {
     const level = await Battery.getBatteryLevelAsync();
@@ -160,4 +165,34 @@ export async function sendIncidentSms(
     deleteTemporaryEvidence(temporaryUris);
   }
   return true;
+}
+
+export async function sendIncidentSosAutomatically(
+  contacts: EmergencyContact[],
+  incident: Incident,
+): Promise<AutomaticSosDispatchResult | null> {
+  if (
+    Platform.OS !== 'android' ||
+    !SafeCityMms ||
+    contacts.length === 0 ||
+    !(await SafeCityMms.canAutoSendAsync())
+  ) {
+    return null;
+  }
+
+  const message = await buildIncidentSmsMessage(incident);
+  const addresses = [...new Set(contacts.map((contact) => contact.phone))];
+  const { attachments, temporaryUris } = await prepareEvidenceAttachments(incident);
+
+  try {
+    return await SafeCityMms.sendEmergencyMmsAsync(
+      addresses,
+      message,
+      attachments.map((attachment) => attachment.uri),
+      attachments.map((attachment) => attachment.mimeType),
+      attachments.map((attachment) => attachment.filename),
+    );
+  } finally {
+    deleteTemporaryEvidence(temporaryUris);
+  }
 }

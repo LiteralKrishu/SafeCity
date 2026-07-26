@@ -1,6 +1,6 @@
 {
   "name": "safecity-mobile",
-  "version": "2.0.0",
+  "version": "3.0.1",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
@@ -8,8 +8,10 @@
     "android": "eas build --platform android --profile preview",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
-    "check": "npm run check:threat-language && npm run check:behavior-baseline && npm run check:background-sos && tsc --noEmit && expo-doctor",
+    "check": "npm run check:threat-language && npm run check:behavior-baseline && npm run check:background-sos && npm run check:timed-interruption && npm run check:automatic-sos && tsc --noEmit && expo-doctor",
     "check:background-sos": "node scripts/validate-background-sos.cjs",
+    "check:automatic-sos": "node scripts/validate-automatic-sos.cjs",
+    "check:timed-interruption": "node scripts/validate-timed-interruption.cjs",
     "check:behavior-baseline": "node scripts/validate-behavior-baseline.cjs",
     "check:threat-language": "node scripts/validate-threat-language.cjs"
   },

@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 
 export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -22,6 +22,7 @@ export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       phone TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'guardian',
       verified INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
@@ -104,6 +105,16 @@ export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
       await db.execAsync('ALTER TABLE incidents ADD COLUMN snapshot_audio_uri TEXT;');
     } catch {
       // Older installs may already have this column from a partial upgrade.
+    }
+  }
+
+  if (currentVersion < 5 && currentVersion > 0) {
+    try {
+      await db.execAsync(
+        "ALTER TABLE contacts ADD COLUMN role TEXT NOT NULL DEFAULT 'guardian';",
+      );
+    } catch {
+      // Existing installs may already have this column from a partial upgrade.
     }
   }
 

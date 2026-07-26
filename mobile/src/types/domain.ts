@@ -5,6 +5,7 @@ export type RiskLevel = 'safe' | 'watch' | 'alert' | 'sos_pending' | 'sos';
 export type SessionState = 'idle' | 'monitoring' | 'paused';
 export type HealthState = 'ready' | 'degraded' | 'blocked' | 'offline' | 'checking';
 export type InferenceModelPreference = 'auto' | 'lite' | 'yamnet';
+export type EmergencyContactRole = 'guardian' | 'police';
 export type VoiceTriggerStatus =
   | 'disabled'
   | 'checking'
@@ -24,6 +25,7 @@ export interface EmergencyContact {
   id: string;
   name: string;
   phone: string;
+  role: EmergencyContactRole;
   verified: boolean;
   createdAt: string;
 }
@@ -97,6 +99,8 @@ export interface AppSettings {
   voiceKeywordEnabled: boolean;
   anonymousRiskSharingEnabled: boolean;
   anonymousRiskConsentGrantedAt: string | null;
+  automaticSosMessagingEnabled: boolean;
+  policeSosEnabled: boolean;
   behaviorBaselineEnabled: boolean;
   inferenceModel: InferenceModelPreference;
   language: LanguagePreference;

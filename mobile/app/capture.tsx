@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   getIncident,
   listContacts,
+  readSettings,
   updateIncidentEvidence,
   updateIncidentLocation,
 } from '@/db/repository';
@@ -16,7 +17,10 @@ import { useLocalization } from '@/i18n/localization-provider';
 import { getPreciseCurrentLocation } from '@/services/backgroundLocation';
 import { encryptEvidenceFile } from '@/services/evidence';
 import { useMonitoring } from '@/services/MonitoringProvider';
-import { sendIncidentSms } from '@/services/sms';
+import {
+  sendIncidentSms,
+  sendIncidentSosAutomatically,
+} from '@/services/sms';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 
 type CapturePhase = 'rear' | 'front' | 'photos_done';
@@ -257,15 +261,34 @@ export default function CaptureScreen() {
         OPERATION_TIMEOUT_MS,
       );
       const details = await settleWithin(
-        Promise.all([getIncident(db, incidentId), listContacts(db)]),
+        Promise.all([
+          getIncident(db, incidentId),
+          listContacts(db),
+          readSettings(db),
+        ]),
         OPERATION_TIMEOUT_MS,
       );
       if (details.ok) {
-        const [incident, contacts] = details.value;
-        if (incident && contacts.length > 0) {
-          // Opening the system composer can remain pending until the user sends or
-          // cancels. Keep it independent from capture navigation.
-          void sendIncidentSms(contacts, incident).catch(() => false);
+        const [incident, contacts, settings] = details.value;
+        const recipients = contacts.filter(
+          (contact) =>
+            contact.role === 'guardian' ||
+            (contact.role === 'police' && settings.policeSosEnabled),
+        );
+        if (incident && recipients.length > 0) {
+          if (settings.automaticSosMessagingEnabled) {
+            const automaticResult = await sendIncidentSosAutomatically(
+              recipients,
+              incident,
+            ).catch(() => null);
+            if (automaticResult === null) {
+              // Preserve the prepared GPS and evidence message if the device or
+              // carrier cannot complete automatic Android dispatch.
+              void sendIncidentSms(recipients, incident).catch(() => false);
+            }
+          } else {
+            void sendIncidentSms(recipients, incident).catch(() => false);
+          }
         }
       }
       void resumeAfterEvidence().catch(() => undefined);

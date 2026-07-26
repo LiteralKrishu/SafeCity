@@ -39,6 +39,7 @@ interface PixelCoordinate {
 interface Tile {
   key: string;
   left: number;
+  size: number;
   top: number;
   url: string;
 }
@@ -70,27 +71,38 @@ function buildTiles(
   center: PixelCoordinate,
   width: number,
   height: number,
-  zoom: number,
+  sourceZoom: number,
+  displayZoom: number,
   mapStyle: 'dark_all' | 'light_all',
 ): Tile[] {
   if (!width || !height) return [];
-  const worldTileCount = 2 ** zoom;
-  const left = center.x - width / 2;
-  const top = center.y - height / 2;
-  const firstTileX = Math.floor(left / TILE_SIZE);
-  const lastTileX = Math.floor((left + width) / TILE_SIZE);
-  const firstTileY = Math.max(0, Math.floor(top / TILE_SIZE));
-  const lastTileY = Math.min(worldTileCount - 1, Math.floor((top + height) / TILE_SIZE));
+  const worldTileCount = 2 ** sourceZoom;
+  const displayScale = 2 ** (displayZoom - sourceZoom);
+  const displayedTileSize = TILE_SIZE * displayScale;
+  const displayedCenter = {
+    x: center.x * displayScale,
+    y: center.y * displayScale,
+  };
+  const left = displayedCenter.x - width / 2;
+  const top = displayedCenter.y - height / 2;
+  const firstTileX = Math.floor(left / displayedTileSize);
+  const lastTileX = Math.floor((left + width) / displayedTileSize);
+  const firstTileY = Math.max(0, Math.floor(top / displayedTileSize));
+  const lastTileY = Math.min(
+    worldTileCount - 1,
+    Math.floor((top + height) / displayedTileSize),
+  );
   const tiles: Tile[] = [];
 
   for (let tileX = firstTileX; tileX <= lastTileX; tileX += 1) {
     for (let tileY = firstTileY; tileY <= lastTileY; tileY += 1) {
       const wrappedTileX = ((tileX % worldTileCount) + worldTileCount) % worldTileCount;
       tiles.push({
-        key: `${zoom}-${tileX}-${tileY}`,
-        left: tileX * TILE_SIZE - left,
-        top: tileY * TILE_SIZE - top,
-        url: `https://a.basemaps.cartocdn.com/${mapStyle}/${zoom}/${wrappedTileX}/${tileY}.png`,
+        key: `${sourceZoom}-${tileX}-${tileY}`,
+        left: tileX * displayedTileSize - left,
+        size: displayedTileSize + 0.75,
+        top: tileY * displayedTileSize - top,
+        url: `https://a.basemaps.cartocdn.com/${mapStyle}/${sourceZoom}/${wrappedTileX}/${tileY}.png`,
       });
     }
   }
@@ -159,6 +171,8 @@ export function SafetyMap({
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [viewport, setViewport] = useState({ width: 0, height });
   const pinchStart = useRef<{ distance: number; zoom: number } | null>(null);
+  const zoomRef = useRef(DEFAULT_ZOOM);
+  const zoomAnimation = useRef<number | null>(null);
   const focusCoordinates: RouteCoordinate[] = [
     center,
     ...route,
@@ -170,7 +184,20 @@ export function SafetyMap({
     displayCenter.longitude,
     zoom,
   );
-  const tiles = buildTiles(centerPixel, viewport.width, viewport.height, zoom, mapStyle);
+  const tileZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.floor(zoom)));
+  const tileCenterPixel = coordinateToWorldPixel(
+    displayCenter.latitude,
+    displayCenter.longitude,
+    tileZoom,
+  );
+  const tiles = buildTiles(
+    tileCenterPixel,
+    viewport.width,
+    viewport.height,
+    tileZoom,
+    zoom,
+    mapStyle,
+  );
   const firstRoutePoint = route[0];
   const lastRoutePoint = route[route.length - 1];
   const routeKey = [
@@ -227,15 +254,24 @@ export function SafetyMap({
     );
 
   useEffect(() => {
-    setZoom(
-      fitCoordinatesZoom(
-        displayCenter,
-        focusCoordinates,
-        viewport.width,
-        viewport.height,
-      ),
+    const fittedZoom = fitCoordinatesZoom(
+      displayCenter,
+      focusCoordinates,
+      viewport.width,
+      viewport.height,
     );
+    zoomRef.current = fittedZoom;
+    setZoom(fittedZoom);
   }, [routeKey, viewport.height, viewport.width]);
+
+  useEffect(
+    () => () => {
+      if (zoomAnimation.current !== null) {
+        cancelAnimationFrame(zoomAnimation.current);
+      }
+    },
+    [],
+  );
 
   const handleLayout = (event: LayoutChangeEvent) => {
     const { width, height: measuredHeight } = event.nativeEvent.layout;
@@ -255,19 +291,51 @@ export function SafetyMap({
   const startPinch = (event: GestureResponderEvent) => {
     const distance = pinchDistance(event);
     if (distance === null) return;
-    pinchStart.current = { distance, zoom };
+    if (zoomAnimation.current !== null) {
+      cancelAnimationFrame(zoomAnimation.current);
+      zoomAnimation.current = null;
+    }
+    pinchStart.current = { distance, zoom: zoomRef.current };
   };
 
   const movePinch = (event: GestureResponderEvent) => {
     const distance = pinchDistance(event);
     const start = pinchStart.current;
     if (distance === null || !start || start.distance <= 0) return;
-    const zoomDelta = Math.round(Math.log2(distance / start.distance) * 2);
-    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, start.zoom + zoomDelta)));
+    const zoomDelta = Math.log2(distance / start.distance);
+    const nextZoom = Math.min(
+      MAX_ZOOM,
+      Math.max(MIN_ZOOM, start.zoom + zoomDelta),
+    );
+    zoomRef.current = nextZoom;
+    setZoom(nextZoom);
   };
 
   const endPinch = () => {
     pinchStart.current = null;
+  };
+
+  const animateZoomTo = (requestedZoom: number) => {
+    if (zoomAnimation.current !== null) {
+      cancelAnimationFrame(zoomAnimation.current);
+    }
+    const startZoom = zoomRef.current;
+    const targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, requestedZoom));
+    const startedAt = Date.now();
+    const duration = 240;
+    const tick = () => {
+      const progress = Math.min(1, (Date.now() - startedAt) / duration);
+      const eased = 1 - (1 - progress) ** 3;
+      const nextZoom = startZoom + (targetZoom - startZoom) * eased;
+      zoomRef.current = nextZoom;
+      setZoom(nextZoom);
+      if (progress < 1) {
+        zoomAnimation.current = requestAnimationFrame(tick);
+      } else {
+        zoomAnimation.current = null;
+      }
+    };
+    zoomAnimation.current = requestAnimationFrame(tick);
   };
 
   return (
@@ -297,7 +365,9 @@ export function SafetyMap({
             styles.tile,
             {
               left: tile.left,
+              height: tile.size,
               top: tile.top,
+              width: tile.size,
             },
           ]}
         />
@@ -428,8 +498,8 @@ export function SafetyMap({
         <Pressable
           accessibilityLabel="Zoom in"
           accessibilityRole="button"
-          disabled={zoom === MAX_ZOOM}
-          onPress={() => setZoom((current) => Math.min(current + 1, MAX_ZOOM))}
+          disabled={zoom >= MAX_ZOOM}
+          onPress={() => animateZoomTo(zoomRef.current + 1)}
           style={({ pressed }) => [styles.zoomButton, pressed && styles.pressed]}
         >
           <Text style={styles.zoomText}>+</Text>
@@ -437,8 +507,8 @@ export function SafetyMap({
         <Pressable
           accessibilityLabel="Zoom out"
           accessibilityRole="button"
-          disabled={zoom === MIN_ZOOM}
-          onPress={() => setZoom((current) => Math.max(current - 1, MIN_ZOOM))}
+          disabled={zoom <= MIN_ZOOM}
+          onPress={() => animateZoomTo(zoomRef.current - 1)}
           style={({ pressed }) => [styles.zoomButton, pressed && styles.pressed]}
         >
           <Text style={styles.zoomText}>-</Text>
@@ -486,8 +556,6 @@ const styles = StyleSheet.create({
   },
   tile: {
     position: 'absolute',
-    width: TILE_SIZE,
-    height: TILE_SIZE,
   },
   mapTint: {
     position: 'absolute',

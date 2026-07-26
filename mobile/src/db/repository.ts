@@ -5,6 +5,7 @@ import type {
   AppSettings,
   Assessment,
   EmergencyContact,
+  EmergencyContactRole,
   Incident,
   RiskLevel,
 } from '@/types/domain';
@@ -28,6 +29,8 @@ export const defaultSettings: AppSettings = {
   voiceKeywordEnabled: false,
   anonymousRiskSharingEnabled: false,
   anonymousRiskConsentGrantedAt: null,
+  automaticSosMessagingEnabled: true,
+  policeSosEnabled: false,
   behaviorBaselineEnabled: false,
   inferenceModel: 'auto',
   language: 'system',
@@ -91,19 +94,22 @@ export async function addContact(
   db: SQLiteDatabase,
   name: string,
   phone: string,
+  role: EmergencyContactRole = 'guardian',
 ): Promise<EmergencyContact> {
   const contact: EmergencyContact = {
     id: Crypto.randomUUID(),
     name: name.trim(),
     phone: phone.trim(),
+    role,
     verified: true,
     createdAt: new Date().toISOString(),
   };
   await db.runAsync(
-    'INSERT INTO contacts (id, name, phone, verified, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO contacts (id, name, phone, role, verified, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     contact.id,
     contact.name,
     contact.phone,
+    contact.role,
     1,
     contact.createdAt,
   );
@@ -115,16 +121,26 @@ export async function listContacts(db: SQLiteDatabase): Promise<EmergencyContact
     id: string;
     name: string;
     phone: string;
+    role: EmergencyContactRole;
     verified: number;
     created_at: string;
-  }>('SELECT id, name, phone, verified, created_at FROM contacts ORDER BY created_at ASC');
+  }>('SELECT id, name, phone, role, verified, created_at FROM contacts ORDER BY created_at ASC');
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
     phone: row.phone,
+    role: row.role === 'police' ? 'police' : 'guardian',
     verified: row.verified === 1,
     createdAt: row.created_at,
   }));
+}
+
+export async function updateContactRole(
+  db: SQLiteDatabase,
+  id: string,
+  role: EmergencyContactRole,
+): Promise<void> {
+  await db.runAsync('UPDATE contacts SET role = ? WHERE id = ?', role, id);
 }
 
 export async function removeContact(db: SQLiteDatabase, id: string): Promise<void> {

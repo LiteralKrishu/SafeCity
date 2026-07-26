@@ -1,7 +1,7 @@
-export const PRIVACY_NOTICE_VERSION = '2026-07-25-v8';
-export const TERMS_VERSION = '2026-07-25-v5';
-export const PROCESSING_CONSENT_VERSION = '2026-07-v9';
-export const LEGAL_EFFECTIVE_DATE = '25 July 2026';
+export const PRIVACY_NOTICE_VERSION = '2026-07-26-v9';
+export const TERMS_VERSION = '2026-07-26-v6';
+export const PROCESSING_CONSENT_VERSION = '2026-07-v10';
+export const LEGAL_EFFECTIVE_DATE = '26 July 2026';
 
 const requiredValue = (value: string | undefined, placeholder: string) => value?.trim() || placeholder;
 
@@ -44,7 +44,7 @@ export const privacySections: LegalSection[] = [
   {
     title: '2. Personal data and exact purposes',
     bullets: [
-      'Emergency-contact name and phone number: stored on your device so SafeCity can prepare an SOS message addressed to the people you choose.',
+      'Emergency-contact name, phone number and Guardian or Police label: stored on your device so SafeCity can address an SOS only to the recipients you choose.',
       'Monitoring-session identifiers: created and stored only in the encrypted database on your device so assessment windows and incident history remain separate.',
       'Short microphone windows: approximately one second of PCM audio is processed in memory by the model bundled in the app during a monitoring session. The latest 15 seconds also remain in a volatile RAM ring buffer and are discarded unless an SOS is confirmed.',
       'Optional voice trigger and threat-language check: if you enable it, a visible Android foreground service continuously passes 16 kHz microphone samples through SafeCity’s bundled quantized model for direct emergency words and a limited catalog of coercive or violent phrases in English, Hindi and Bengali, including while the app is not open. It is keyword spotting, not general transcription. A threat phrase alone cannot start SOS: the phrase must repeat and agree with independently detected distress audio or motion. Samples and ordinary phrase labels stay in volatile phone memory; the listener does not retain audio or use an operating-system speech service, account, language-pack download or network recognition. It remains enabled until you turn it off from SafeCity or its persistent notification.',
@@ -54,14 +54,14 @@ export const privacySections: LegalSection[] = [
       'Location: the latest available coordinates may be held locally during monitoring and attached to an incident. Exact location is not used by the bundled audio model. If adaptive deviation detection is enabled, the phone converts an accurate fix to an approximately 500-metre local cell before learning a routine profile. If you choose “Load real nearby places” in Safety Navigator, the current coordinates are sent to the OpenStreetMap Overpass service to retrieve nearby mapped facilities and lighting tags.',
       'Optional anonymous community risk reporting: if you separately enable it in Settings, a confirmed SOS may contribute an approximately 500-metre cell, an hourly time bucket, trigger category and a rotating one-way deduplication token. Exact GPS, audio, photos, contacts, incident details and a stable installation identifier are not sent. The aggregation service hides cells with fewer than the configured minimum number of contributions and never publishes exact counts.',
       'Incident records: time, risk result, factors, model version, location if available, evidence status and your false-alarm feedback are stored in the encrypted local database.',
-      'SOS evidence: when an SOS is confirmed, SafeCity may encrypt the latest 15-second pre-alert RAM snapshot. While the capture screen is visible it may also collect one rear photo, one front photo and 15 seconds of post-SOS audio. These files are AES-GCM encrypted in app-private storage. Available evidence is decrypted into temporary app cache only when SafeCity prepares it as an attachment in the system message composer.',
+      'SOS evidence: when an SOS is confirmed, SafeCity may encrypt the latest 15-second pre-alert RAM snapshot. While the capture screen is visible it may also collect one rear photo, one front photo and 15 seconds of post-SOS audio. These files are AES-GCM encrypted in app-private storage. Available evidence is decrypted into temporary app cache only while Android messaging prepares automatic MMS delivery or the fallback system message composer.',
       'Consent and legal records: notice version, terms version, adult confirmation and acceptance timestamps are retained locally to record your choices.',
     ],
   },
   {
     title: '3. Why processing is lawful',
     paragraphs: [
-      'SafeCity relies on your free, specific, informed and affirmative consent for monitoring audio, motion, location, the optional continuous voice trigger and post-SOS evidence. Anonymous community risk reporting has a separate, off-by-default Settings control and confirmation. You separately control operating-system permissions, decide when monitoring starts and decide when optional features are enabled.',
+      'SafeCity relies on your free, specific, informed and affirmative consent for monitoring audio, motion, location, the optional continuous voice trigger, post-SOS evidence and automatic guardian messaging. Android separately asks for SMS permission, and you can turn automatic guardian messaging off in Settings. Police messaging has a separate, off-by-default control and confirmation. Anonymous community risk reporting also has a separate, off-by-default Settings control and confirmation.',
       'You voluntarily provide emergency-contact data for the specific purpose of preparing an SOS message. You must have authority to provide that contact’s details and should inform the contact.',
     ],
   },
@@ -69,7 +69,8 @@ export const privacySections: LegalSection[] = [
     title: '4. When data leaves the device',
     bullets: [
       'Monitoring audio, motion features, assessment context and risk calculations stay on this device. SafeCity does not transmit them to a laptop, inference server or cloud service.',
-      'Your system messaging app receives the prepared SOS text, location and temporary evidence attachments when the composer opens so you can review them. Your selected contacts and telecom or messaging provider receive them only if you press Send.',
+      'When automatic guardian messaging is enabled and Android SMS permission is granted, Android messaging and your telecom provider receive the SOS text, exact location and temporary evidence attachments after the countdown and evidence capture finish, and the selected Guardian contacts receive the carrier message. If automatic delivery is unavailable, SafeCity opens a prepared composer for you to send.',
+      'Contacts marked Police are excluded unless you separately turn on “Send to selected police contact.” Carrier delivery and emergency-service response are not guaranteed, and SafeCity does not replace calling 112.',
       'A mapping provider receives coordinates only if you choose to open the incident location.',
       'The OpenStreetMap Overpass service receives the current coordinates only if you choose to load real nearby places in Safety Navigator. Its response is used on that screen and is not saved to SafeCity history.',
       'If you enable anonymous community risk reporting, the SafeCity aggregation service receives only the coarse cell, hourly time bucket, trigger category and a rotating cell/day token. The service retains coarse reports for up to 30 days, requires a crowd threshold before publishing a zone and does not receive SOS evidence or exact GPS.',
@@ -82,7 +83,7 @@ export const privacySections: LegalSection[] = [
     bullets: [
       'Raw monitoring audio and ordinary assessment windows: kept only in volatile memory while the bundled model and fusion rules run. The rolling 15-second buffer is discarded when monitoring stops unless an SOS is confirmed and the snapshot is encrypted as evidence.',
       'Incidents and encrypted evidence: kept for the retention period you choose in Settings, from 1 to 90 days; the default is 30 days. You can delete an incident sooner.',
-      'Temporary decrypted evidence prepared for an SOS message is removed from SafeCity cache when you return from the system composer. Your messaging app may retain a draft or sent copy under its own settings and privacy notice.',
+      'Temporary decrypted evidence prepared for an SOS message is removed from SafeCity cache after automatic dispatch is requested or when you return from the fallback composer. Your messaging app may retain a draft or sent copy under its own settings and privacy notice.',
       'Emergency contacts and consent records: kept until you remove them, withdraw consent or erase app data.',
       'Latest background location: overwritten by newer location data and erased with app data. Monitoring stops when you stop or withdraw consent.',
       'Adaptive deviation profiles: up to 256 aggregate profiles and 35 distinct learning-day markers remain in the encrypted local database until you clear the baseline, turn deviation detection off, withdraw consent or erase app data.',
@@ -137,22 +138,22 @@ export const termsSections: LegalSection[] = [
     bullets: [
       'You must be at least 18 years old for this build.',
       'You must provide accurate information and have authority to provide each emergency contact’s name and number.',
-      'You are responsible for informing contacts that SafeCity may prepare messages addressed to them.',
+      'You are responsible for informing contacts that SafeCity may automatically address SOS messages to them.',
     ],
   },
   {
     title: '3. What SafeCity is—and is not',
     paragraphs: [
-      'SafeCity is an assistive personal-safety prototype. It may analyze permitted audio and motion signals, compare coarse behavioral features with a local baseline, request a check-in, prepare evidence and open an SMS composer after an SOS.',
+      'SafeCity is an assistive personal-safety prototype. It may analyze permitted audio and motion signals, compare coarse behavioral features with a local baseline, request a check-in, prepare evidence and request automatic Android SMS or MMS delivery after an SOS, with a system-composer fallback.',
       'SafeCity is not an emergency service, medical device, law-enforcement service, monitored alarm or guarantee of detection, message delivery, rescue or safety. Call the appropriate emergency number when you need immediate help.',
     ],
   },
   {
     title: '4. Your control and responsibilities',
     bullets: [
-      'You decide when monitoring starts and stops, whether the optional voice trigger remains enabled and which operating-system permissions to allow.',
+      'You decide when monitoring starts and stops, whether the optional voice trigger and automatic guardian messaging remain enabled, whether Police contacts are included, and which operating-system permissions to allow.',
       'You must review the visible sensor-health status and must not rely on unavailable or degraded sensors.',
-      'You must verify SMS content, recipients, location and evidence attachments before pressing Send. Carrier or MMS charges may apply.',
+      'You must keep Guardian and Police contact labels accurate and review the SOS message format before enabling automatic delivery. Carrier SMS or MMS charges may apply.',
       'You must keep the device, app, operating system and emergency-contact list secure and current.',
       'You must not use SafeCity to surveil another person, record unlawfully, harass, send false emergency messages, interfere with the service or violate any law.',
     ],
@@ -161,7 +162,7 @@ export const termsSections: LegalSection[] = [
     title: '5. Evidence, location and third-party services',
     paragraphs: [
       'Evidence collection is limited by mobile operating systems and may work only while SafeCity is visible. Location, camera, microphone, the bundled keyword engine, full-screen notifications, mapping and SMS may be interrupted, incomplete or inaccurate. Android may replace a voice-triggered full-screen countdown with a prominent notification when full-screen alert access is unavailable; force-stopping the app stops background listening until SafeCity is opened again. After a phone restart, motion monitoring can resume automatically, but Android requires you to tap SafeCity’s notification once before microphone keyword listening resumes.',
-      'Third-party services have their own terms and privacy notices. SafeCity does not claim that an SMS was delivered merely because the composer opened.',
+      'Third-party services have their own terms and privacy notices. SafeCity does not claim delivery merely because Android accepted an automatic send request or opened the fallback composer.',
     ],
   },
   {

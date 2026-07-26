@@ -1,4 +1,3 @@
-import * as Notifications from 'expo-notifications';
 import { type Href, useRouter } from 'expo-router';
 import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
@@ -67,49 +66,6 @@ export function HomeEscapeTools({
     );
   };
 
-  const scheduleInterruption = (seconds: number) => {
-    void (async () => {
-      try {
-        const permission = await Notifications.requestPermissionsAsync();
-        if (!permission.granted) throw new Error('Notifications are off.');
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: t('escape.notificationTitle'),
-            body: t('escape.notificationBody'),
-            categoryIdentifier: 'safety-status',
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-            seconds,
-            repeats: false,
-          },
-        });
-        Alert.alert(
-          t('escape.scheduledTitle'),
-          t('escape.scheduledBody', { seconds }),
-        );
-      } catch {
-        Alert.alert(
-          t('escape.scheduleErrorTitle'),
-          t('escape.scheduleErrorBody'),
-        );
-      }
-    })();
-  };
-
-  const chooseInterruption = () => {
-    Alert.alert(
-      t('escape.chooseDelay'),
-      undefined,
-      [
-        { text: t('escape.delay15'), onPress: () => scheduleInterruption(15) },
-        { text: t('escape.delay30'), onPress: () => scheduleInterruption(30) },
-        { text: t('escape.delay60'), onPress: () => scheduleInterruption(60) },
-        { text: t('common.cancel'), style: 'cancel' },
-      ],
-    );
-  };
-
   const showExitLines = () => {
     Alert.alert(
       t('escape.scriptsTitle'),
@@ -150,8 +106,8 @@ export function HomeEscapeTools({
     {
       icon: '◷',
       title: t('escape.interruptionTitle'),
-      detail: 'Get an urgent alert',
-      onPress: chooseInterruption,
+      detail: 'Choose a call or ride',
+      onPress: () => router.push('/timed-interruption' as Href),
     },
     {
       icon: '✉',

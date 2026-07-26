@@ -22,6 +22,7 @@ import {
   listContacts,
   readSettings,
   removeContact,
+  updateContactRole,
   writeSettings,
 } from '@/db/repository';
 import { useLocalization } from '@/i18n/localization-provider';
@@ -36,6 +37,7 @@ import {
   isPersistentVoiceTriggerAvailable,
   openVoiceTriggerOverlaySettings,
 } from '@/services/persistent-voice-trigger';
+import { requestAutomaticSmsPermission } from '@/services/permissions';
 import {
   isRiskServiceConfigured,
   resetAnonymousRiskIdentity,
@@ -48,7 +50,12 @@ import {
 } from '@/legal/content';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 import { type AppearancePreference, useTheme } from '@/theme/theme-provider';
-import type { AppSettings, EmergencyContact, VoiceTriggerStatus } from '@/types/domain';
+import type {
+  AppSettings,
+  EmergencyContact,
+  EmergencyContactRole,
+  VoiceTriggerStatus,
+} from '@/types/domain';
 
 const voiceStatusKeys = {
   disabled: 'settings.voiceStatus.disabled',
@@ -68,6 +75,8 @@ export default function SettingsScreen() {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [newContactRole, setNewContactRole] =
+    useState<EmergencyContactRole>('guardian');
   const [erasing, setErasing] = useState(false);
   const [languagePickerVisible, setLanguagePickerVisible] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
@@ -113,10 +122,87 @@ export default function SettingsScreen() {
       Alert.alert(t('settings.contactNeeded'), t('settings.contactNeededBody'));
       return;
     }
-    await addContact(db, name, phone);
+    await addContact(db, name, phone, newContactRole);
     setName('');
     setPhone('');
+    setNewContactRole('guardian');
     await refresh();
+  };
+
+  const updateAutomaticSosMessaging = async (enabled: boolean) => {
+    if (!enabled) {
+      await save({
+        ...settings,
+        automaticSosMessagingEnabled: false,
+        policeSosEnabled: false,
+      });
+      return;
+    }
+
+    const granted = await requestAutomaticSmsPermission();
+    if (!granted) {
+      Alert.alert(
+        'SMS access is needed',
+        'Allow SMS access so SafeCity can send the SOS and current location when the countdown ends.',
+      );
+      return;
+    }
+    await save({ ...settings, automaticSosMessagingEnabled: true });
+  };
+
+  const updatePoliceSos = (enabled: boolean) => {
+    if (!enabled) {
+      void save({ ...settings, policeSosEnabled: false });
+      return;
+    }
+    if (!contacts.some((contact) => contact.role === 'police')) {
+      Alert.alert(
+        'Select a police contact first',
+        'Add a police station or officer number below and choose Police as its contact type.',
+      );
+      return;
+    }
+    Alert.alert(
+      'Send SOS to selected police contact?',
+      'Only contacts marked Police will be included. Delivery and police response cannot be guaranteed. Call 112 when possible.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Turn on',
+          onPress: () => {
+            void (async () => {
+              if (!settings.automaticSosMessagingEnabled) {
+                const granted = await requestAutomaticSmsPermission();
+                if (!granted) return;
+              }
+              await save({
+                ...settings,
+                automaticSosMessagingEnabled: true,
+                policeSosEnabled: true,
+              });
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  const changeContactRole = (contact: EmergencyContact) => {
+    if (contact.role === 'police') {
+      void updateContactRole(db, contact.id, 'guardian').then(refresh);
+      return;
+    }
+    Alert.alert(
+      'Mark as police contact?',
+      `${contact.name} will receive an SOS only when “Send to selected police contact” is turned on.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark Police',
+          onPress: () => void updateContactRole(db, contact.id, 'police').then(refresh),
+        },
+      ],
+    );
   };
 
   const updateVoiceTrigger = async (enabled: boolean) => {
@@ -548,14 +634,51 @@ export default function SettingsScreen() {
       </Card>
 
       <Text style={styles.sectionLabel}>{t('settings.contactsSection')}</Text>
-      <Card subtitle={t('settings.contactsDetail')}>
+      <Card
+        title="SOS delivery"
+        subtitle="After evidence capture, SafeCity sends the location, photos and audio to the selected recipients."
+      >
+        <SettingRow
+          title="Auto-send to guardians"
+          description="Automatically send after the SOS countdown and evidence capture finish."
+          value={settings.automaticSosMessagingEnabled}
+          onChange={(enabled) => void updateAutomaticSosMessaging(enabled)}
+        />
+        <SettingRow
+          title="Send to selected police contact"
+          description="Off by default. Only contacts marked Police are included."
+          value={settings.policeSosEnabled}
+          onChange={updatePoliceSos}
+        />
+        <Text style={styles.deliveryNote}>
+          Uses your mobile plan. Carrier delivery and emergency response cannot be guaranteed.
+        </Text>
+      </Card>
+      <Card subtitle="Choose Guardian or Police for every saved number. Tap the label to change it.">
         {contacts.map((contact) => (
           <View key={contact.id} style={styles.contactRow}>
             <View style={styles.contactCopy}>
               <Text style={styles.contactName}>{contact.name}</Text>
               <Text style={styles.contactPhone}>{contact.phone}</Text>
             </View>
-            <Text style={styles.contactReady}>✓ {t('settings.ready')}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Change ${contact.name} contact type`}
+              onPress={() => changeContactRole(contact)}
+              style={[
+                styles.contactRole,
+                contact.role === 'police' && styles.contactRolePolice,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.contactRoleText,
+                  contact.role === 'police' && styles.contactRoleTextPolice,
+                ]}
+              >
+                {contact.role === 'police' ? 'POLICE' : 'GUARDIAN'}
+              </Text>
+            </Pressable>
             <Pressable
               accessibilityLabel={t('settings.removeContact', { name: contact.name })}
               onPress={() => void removeContact(db, contact.id).then(refresh)}
@@ -580,6 +703,32 @@ export default function SettingsScreen() {
             onChangeText={setPhone}
             style={styles.input}
           />
+          <View style={styles.rolePicker}>
+            {(['guardian', 'police'] as EmergencyContactRole[]).map((role) => (
+              <Pressable
+                key={role}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: newContactRole === role }}
+                onPress={() => setNewContactRole(role)}
+                style={[
+                  styles.roleOption,
+                  newContactRole === role && styles.roleOptionActive,
+                  role === 'police' &&
+                    newContactRole === role &&
+                    styles.roleOptionPolice,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.roleOptionText,
+                    newContactRole === role && styles.roleOptionTextActive,
+                  ]}
+                >
+                  {role === 'guardian' ? 'Guardian' : 'Police'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           <ActionButton label={t('settings.addContact')} variant="secondary" onPress={() => void addNewContact()} />
         </View>
       </Card>
@@ -830,9 +979,32 @@ const styles = StyleSheet.create({
   contactCopy: { flex: 1 },
   contactName: { color: colors.text, fontWeight: '700' },
   contactPhone: { color: colors.textMuted, fontSize: type.caption, marginTop: 3 },
-  contactReady: { color: colors.safe, fontWeight: '800', fontSize: type.caption },
+  contactRole: {
+    borderRadius: radii.pill,
+    backgroundColor: colors.safeSoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  contactRolePolice: { backgroundColor: colors.dangerSoft },
+  contactRoleText: { color: colors.safe, fontWeight: '900', fontSize: 9, letterSpacing: 0.5 },
+  contactRoleTextPolice: { color: colors.danger },
   remove: { color: colors.textMuted, fontSize: 24 },
   form: { gap: spacing.sm },
+  rolePicker: { flexDirection: 'row', gap: spacing.sm },
+  roleOption: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleOptionActive: { borderColor: colors.safe, backgroundColor: colors.safeSoft },
+  roleOptionPolice: { borderColor: colors.danger, backgroundColor: colors.dangerSoft },
+  roleOptionText: { color: colors.textMuted, fontSize: type.caption, fontWeight: '800' },
+  roleOptionTextActive: { color: colors.text },
+  deliveryNote: { color: colors.alert, fontSize: 11, lineHeight: 16, marginTop: spacing.sm },
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   retentionRow: {
     flexDirection: 'row',

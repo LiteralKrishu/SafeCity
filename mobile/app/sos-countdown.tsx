@@ -120,15 +120,15 @@ export default function SosCountdownScreen() {
       </Text>
       <Text style={styles.body}>
         {activating
-          ? 'SafeCity is capturing available evidence, then your phone will open a message with the SOS text, location, photos and audio for you to review and send.'
-          : 'Encrypted evidence capture will begin when the countdown reaches zero.'}
+          ? 'SafeCity is attaching your current location, photos and audio, then sending the SOS to your guardians.'
+          : 'At zero, SafeCity captures evidence and sends the SOS to your guardians.'}
       </Text>
 
       <View style={styles.statusCard}>
         <Text style={styles.statusIcon}>▣</Text>
         <View style={styles.statusCopy}>
-          <Text style={styles.statusTitle}>No silent dispatch</Text>
-          <Text style={styles.statusBody}>SafeCity cannot guarantee detection, SMS delivery, police response, or family response. Call 112 directly when possible.</Text>
+          <Text style={styles.statusTitle}>Guardian alert is automatic</Text>
+          <Text style={styles.statusBody}>Police contacts are included only when you turn that option on in Settings. Delivery and response cannot be guaranteed. Call 112 when possible.</Text>
         </View>
       </View>
 

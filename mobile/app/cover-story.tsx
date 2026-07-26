@@ -1,9 +1,11 @@
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect } from 'react';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useLocalization } from '@/i18n/localization-provider';
+import { dismissTimedInterruption } from '@/services/timed-interruption';
 import { radii, spacing, type } from '@/theme/tokens';
 
 const rideYellow = '#FFD428';
@@ -14,7 +16,24 @@ const rideMuted = '#6F6B5E';
 
 export default function CoverStoryScreen() {
   const router = useRouter();
+  const { interruption } = useLocalSearchParams<{
+    interruption?: string | string[];
+  }>();
   const { t } = useLocalization();
+  const openedByTimer = (Array.isArray(interruption) ? interruption[0] : interruption) === '1';
+
+  useEffect(() => {
+    if (!openedByTimer) return;
+    void dismissTimedInterruption().catch(() => undefined);
+    const timeout = setTimeout(() => {
+      Alert.alert(
+        t('cover.rideTitle'),
+        `${t('cover.rideDriver')} · ${t('cover.pickupPoint')}`,
+        [{ text: t('escape.open') }],
+      );
+    }, 350);
+    return () => clearTimeout(timeout);
+  }, [openedByTimer, t]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom', 'left', 'right']}>

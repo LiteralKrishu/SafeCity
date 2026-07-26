@@ -1,4 +1,3 @@
-import * as Notifications from 'expo-notifications';
 import { type Href, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Share, StyleSheet, Text, View } from 'react-native';
@@ -9,7 +8,7 @@ import { Screen } from '@/components/Screen';
 import { useLocalization } from '@/i18n/localization-provider';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 
-type VisibleSheet = 'location' | 'delay' | 'scripts' | null;
+type VisibleSheet = 'location' | 'scripts' | null;
 
 export default function EscapeToolsScreen() {
   const router = useRouter();
@@ -21,12 +20,6 @@ export default function EscapeToolsScreen() {
     { id: 'office', label: t('escape.locationOffice') },
     { id: 'metro', label: t('escape.locationMetro') },
     { id: 'cafe', label: t('escape.locationCafe') },
-  ];
-
-  const delays: ChoiceItem[] = [
-    { id: '15', label: t('escape.delay15') },
-    { id: '30', label: t('escape.delay30') },
-    { id: '60', label: t('escape.delay60') },
   ];
 
   const scripts: ChoiceItem[] = [
@@ -42,33 +35,6 @@ export default function EscapeToolsScreen() {
       title: t('escape.shareTitle'),
       message: t('escape.locationMessage', { place: item.label }),
     });
-  };
-
-  const scheduleInterruption = async (item: ChoiceItem) => {
-    setVisibleSheet(null);
-    const seconds = Number(item.id);
-    try {
-      const permission = await Notifications.requestPermissionsAsync();
-      if (!permission.granted) throw new Error('Notification permission denied');
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: t('escape.notificationTitle'),
-          body: t('escape.notificationBody'),
-          categoryIdentifier: 'safety-status',
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds,
-          repeats: false,
-        },
-      });
-      Alert.alert(
-        t('escape.scheduledTitle'),
-        t('escape.scheduledBody', { seconds }),
-      );
-    } catch {
-      Alert.alert(t('escape.scheduleErrorTitle'), t('escape.scheduleErrorBody'));
-    }
   };
 
   const showScript = (item: ChoiceItem) => {
@@ -104,7 +70,7 @@ export default function EscapeToolsScreen() {
             icon="◷"
             title={t('escape.interruptionTitle')}
             detail={t('escape.interruptionDetail')}
-            onPress={() => setVisibleSheet('delay')}
+            onPress={() => router.push('/timed-interruption' as Href)}
           />
           <EscapeToolCard
             icon="▰"
@@ -132,13 +98,6 @@ export default function EscapeToolsScreen() {
         note={t('escape.shareNote')}
         items={locations}
         onSelect={(item) => void shareLocationCover(item)}
-        onClose={() => setVisibleSheet(null)}
-      />
-      <ChoiceSheet
-        visible={visibleSheet === 'delay'}
-        title={t('escape.chooseDelay')}
-        items={delays}
-        onSelect={(item) => void scheduleInterruption(item)}
         onClose={() => setVisibleSheet(null)}
       />
       <ChoiceSheet

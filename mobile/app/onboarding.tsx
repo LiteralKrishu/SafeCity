@@ -28,7 +28,7 @@ import {
 } from '@/legal/content';
 import { useMonitoring } from '@/services/MonitoringProvider';
 import {
-  allCorePermissionsGranted,
+  allSetupPermissionsGranted,
   getCorePermissionSnapshot,
   requestCorePermissions,
   type PermissionSnapshot,
@@ -121,7 +121,7 @@ export default function OnboardingScreen() {
 
   const consentComplete = consents.every(Boolean) && legalAcceptances.every(Boolean);
   const permissionsComplete =
-    permissionSnapshot !== null && allCorePermissionsGranted(permissionSnapshot);
+    permissionSnapshot !== null && allSetupPermissionsGranted(permissionSnapshot);
   const canFinish = useMemo(
     () => permissionsComplete && consentComplete && contacts.length > 0,
     [consentComplete, contacts.length, permissionsComplete],
@@ -170,6 +170,11 @@ export default function OnboardingScreen() {
       key: 'fullScreenAlerts' as const,
       title: t('onboarding.permissionFullScreen'),
       instruction: t('onboarding.permissionFullScreenChoice'),
+    },
+    {
+      key: 'automaticSms' as const,
+      title: 'Automatic SOS messages',
+      instruction: 'Choose Allow so SafeCity can send the SOS and location when the countdown ends.',
     },
   ];
   const missingPermissions = permissionSnapshot
@@ -243,7 +248,7 @@ export default function OnboardingScreen() {
     try {
       const verifiedPermissions = await getCorePermissionSnapshot();
       updatePermissionState(verifiedPermissions);
-      if (!allCorePermissionsGranted(verifiedPermissions)) {
+      if (!allSetupPermissionsGranted(verifiedPermissions)) {
         setPermissionError(t('onboarding.fixPermissionsFirst'));
         return;
       }

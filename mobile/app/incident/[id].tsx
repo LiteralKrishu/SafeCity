@@ -13,6 +13,7 @@ import {
   deleteIncidentRecord,
   getIncident,
   listContacts,
+  readSettings,
   resolveIncident,
   setIncidentFeedback,
 } from '@/db/repository';
@@ -76,8 +77,16 @@ export default function IncidentDetailScreen() {
   }
 
   const notify = async () => {
-    const contacts = await listContacts(db);
-    if (!(await sendIncidentSms(contacts, incident))) {
+    const [contacts, settings] = await Promise.all([
+      listContacts(db),
+      readSettings(db),
+    ]);
+    const recipients = contacts.filter(
+      (contact) =>
+        contact.role === 'guardian' ||
+        (contact.role === 'police' && settings.policeSosEnabled),
+    );
+    if (!(await sendIncidentSms(recipients, incident))) {
       Alert.alert(t('incident.smsUnavailableTitle'), t('incident.smsUnavailableBody'));
     }
   };

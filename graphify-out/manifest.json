@@ -1,7 +1,7 @@
 {
   "mobile/app.json": {
-    "mtime": 1784965556.4928389,
-    "ast_hash": "5bfe080845feef4f64d5e862d449fefa",
+    "mtime": 1785054471.5923457,
+    "ast_hash": "784ac9ce9ab10c09bb11098127861505",
     "semantic_hash": ""
   },
   "mobile/app/(tabs)/_layout.tsx": {
@@ -15,23 +15,18 @@
     "semantic_hash": ""
   },
   "mobile/app/(tabs)/index.tsx": {
-    "mtime": 1784961573.1123998,
-    "ast_hash": "519a28465d77eaad33a92e7cda377f60",
+    "mtime": 1785055396.3597925,
+    "ast_hash": "428201641aa18e9958856f91ba1a0876",
     "semantic_hash": ""
   },
   "mobile/app/(tabs)/settings.tsx": {
-    "mtime": 1784969346.1244588,
-    "ast_hash": "fc0ab7e31c68f721fad1079633cace7d",
+    "mtime": 1785053798.574507,
+    "ast_hash": "fb44b32f4ace2f2eb51e6bbf77a9b77d",
     "semantic_hash": ""
   },
   "mobile/app/_layout.tsx": {
-    "mtime": 1784805407.030896,
-    "ast_hash": "674d21ff0806fd629dcf627c0e6d5a6e",
-    "semantic_hash": ""
-  },
-  "mobile/app/calculator.tsx": {
-    "mtime": 1784714964.3365114,
-    "ast_hash": "040c355b229871bc8430eff9e8828c96",
+    "mtime": 1785054322.1571012,
+    "ast_hash": "9687c2dc6d215306ea30a35c6650f3bd",
     "semantic_hash": ""
   },
   "mobile/app/capture.tsx": {
@@ -45,8 +40,8 @@
     "semantic_hash": ""
   },
   "mobile/app/escape-tools.tsx": {
-    "mtime": 1784714964.4181457,
-    "ast_hash": "974d3e23264bbc0097308ceedfba1635",
+    "mtime": 1785053594.9963198,
+    "ast_hash": "b0fcff0d4f4b9304117b0e8a8899ff79",
     "semantic_hash": ""
   },
   "mobile/app/fake-call.tsx": {
@@ -60,8 +55,8 @@
     "semantic_hash": ""
   },
   "mobile/app/index.tsx": {
-    "mtime": 1784961562.4704792,
-    "ast_hash": "45201d85df5f3b3efe3c2e3892e6b640",
+    "mtime": 1785056096.6381216,
+    "ast_hash": "f7abe563e12a9e586d7d2da87d277ef1",
     "semantic_hash": ""
   },
   "mobile/app/legal/privacy.tsx": {
@@ -80,18 +75,18 @@
     "semantic_hash": ""
   },
   "mobile/app/onboarding.tsx": {
-    "mtime": 1784969311.9721594,
-    "ast_hash": "bc3eb4d3f0de73ac492880b1b5fb0259",
+    "mtime": 1785055099.652725,
+    "ast_hash": "5b11a4eb0147ce8f80a034cbc50dc974",
     "semantic_hash": ""
   },
   "mobile/app/safety-navigator.tsx": {
-    "mtime": 1784967209.6367755,
-    "ast_hash": "175f91c2d46dc47159344a7680143c26",
+    "mtime": 1785053778.215381,
+    "ast_hash": "5e2926fb390207235860cb4f44ffe9fa",
     "semantic_hash": ""
   },
   "mobile/app/sensor/[sensor].tsx": {
-    "mtime": 1784969363.1952913,
-    "ast_hash": "2468d1e7b3f89bda82d58bcd7a6152be",
+    "mtime": 1785055396.4427834,
+    "ast_hash": "cb6ae473c31a36f124f8b5af4fd7b18b",
     "semantic_hash": ""
   },
   "mobile/app/siren.tsx": {
@@ -100,8 +95,8 @@
     "semantic_hash": ""
   },
   "mobile/app/sos-countdown.tsx": {
-    "mtime": 1784968085.2311137,
-    "ast_hash": "cdb0c6e93f686cd34f10dd6479d12977",
+    "mtime": 1785056315.0643797,
+    "ast_hash": "6067b5169338987653ca03914d1d88ef",
     "semantic_hash": ""
   },
   "mobile/eas.json": {
@@ -120,8 +115,8 @@
     "semantic_hash": ""
   },
   "mobile/package.json": {
-    "mtime": 1784994615.7131839,
-    "ast_hash": "5d76bf25e66ce0a6a7edbbb96282f312",
+    "mtime": 1785056152.2336762,
+    "ast_hash": "9a9df424e7f9654d8fc915cc36e828a6",
     "semantic_hash": ""
   },
   "mobile/src/components/ActionButton.tsx": {
@@ -195,8 +190,8 @@
     "semantic_hash": ""
   },
   "mobile/src/i18n/translations.ts": {
-    "mtime": 1784969311.8863053,
-    "ast_hash": "d472416194f20d97867acbab059abd01",
+    "mtime": 1785055396.2765775,
+    "ast_hash": "333e90c3e22252188aa26df10e6e55d9",
     "semantic_hash": ""
   },
   "mobile/src/i18n/types.ts": {
@@ -220,8 +215,8 @@
     "semantic_hash": ""
   },
   "mobile/src/services/MonitoringProvider.tsx": {
-    "mtime": 1784969462.3282564,
-    "ast_hash": "a9cc9b3e258af942a191f56e4ebbf571",
+    "mtime": 1785056336.7802606,
+    "ast_hash": "109e2cf3e4d84b254737c3d1a8426427",
     "semantic_hash": ""
   },
   "mobile/src/services/StartupMaintenance.tsx": {
@@ -265,13 +260,13 @@
     "semantic_hash": ""
   },
   "mobile/src/services/voice-trigger.ts": {
-    "mtime": 1784968029.7476435,
-    "ast_hash": "15f82fa466b3e6f27a5f8a5bc78ae251",
+    "mtime": 1785055359.083167,
+    "ast_hash": "6a20a05689f3cb0e7b8679bf7a5e7dfb",
     "semantic_hash": ""
   },
   "mobile/src/store/monitorStore.ts": {
-    "mtime": 1784969034.0469365,
-    "ast_hash": "38bbe5862f33424c19583b6f9276fee8",
+    "mtime": 1785053357.5727725,
+    "ast_hash": "b16a89533f75d5635a3c8fe032cf9fdd",
     "semantic_hash": ""
   },
   "mobile/src/theme/theme-provider.tsx": {
@@ -400,8 +395,8 @@
     "semantic_hash": ""
   },
   "docs/ARCHITECTURE.md": {
-    "mtime": 1784994622.1381338,
-    "ast_hash": "2f36ab817b6ab179de15a5fb11e59b8d",
+    "mtime": 1784994705.8163521,
+    "ast_hash": "4a337100028322578dad78add2c82c50",
     "semantic_hash": ""
   },
   "docs/DPDP_COMPLIANCE.md": {
@@ -535,13 +530,13 @@
     "semantic_hash": ""
   },
   "mobile/modules/safecity-voice-trigger/android/src/main/java/com/safecity/voicetrigger/SafeCityVoiceTriggerModule.kt": {
-    "mtime": 1784968392.4111314,
-    "ast_hash": "bfcd5eff208342f907758b395ae27ee5",
+    "mtime": 1785056314.8244634,
+    "ast_hash": "26460c81d22c21863749278e92d9b039",
     "semantic_hash": ""
   },
   "mobile/modules/safecity-voice-trigger/android/src/main/java/com/safecity/voicetrigger/SafeCityVoiceTriggerService.kt": {
-    "mtime": 1784968171.4744139,
-    "ast_hash": "79ad571ae9c276aab827d9b1665d76e4",
+    "mtime": 1785056336.6981297,
+    "ast_hash": "d8fa0ec5839fe512ba9c0b4626f640fa",
     "semantic_hash": ""
   },
   "mobile/modules/safecity-voice-trigger/expo-module.config.json": {
@@ -550,18 +545,18 @@
     "semantic_hash": ""
   },
   "mobile/modules/safecity-voice-trigger/index.ts": {
-    "mtime": 1784965649.5714872,
-    "ast_hash": "549adb5fb757b3706979341eabadad55",
+    "mtime": 1785056314.7448947,
+    "ast_hash": "7ab6230c21152f995c9cb58aebc4abe5",
     "semantic_hash": ""
   },
   "mobile/plugins/with-safecity-theme-colors.js": {
-    "mtime": 1784805017.9971662,
-    "ast_hash": "9f7964beb0154b7c39727eced28bcd55",
+    "mtime": 1785056105.0746648,
+    "ast_hash": "0def7901cd522bedbcb0831366e85569",
     "semantic_hash": ""
   },
   "mobile/src/components/SafetyMap.tsx": {
-    "mtime": 1784967242.0412922,
-    "ast_hash": "74a6dc94591178043ac4603b3f7674e1",
+    "mtime": 1785053758.5418537,
+    "ast_hash": "f53783ab6ddffa174524e9c36fe41d6b",
     "semantic_hash": ""
   },
   "mobile/src/i18n/language-storage.ts": {
@@ -590,8 +585,8 @@
     "semantic_hash": ""
   },
   "mobile/src/inference/safetyCalibration.ts": {
-    "mtime": 1784964840.029915,
-    "ast_hash": "850332a13d6d3ef50b2a7405b4e990e0",
+    "mtime": 1785053357.6610065,
+    "ast_hash": "8752cd2ce7b03e99cfce4a57f1438b62",
     "semantic_hash": ""
   },
   "mobile/src/inference/threatLanguage.ts": {
@@ -600,8 +595,8 @@
     "semantic_hash": ""
   },
   "mobile/src/services/persistent-voice-trigger.ts": {
-    "mtime": 1784968085.1474838,
-    "ast_hash": "90d6d9bcd6aeab5f3cd092b20f0e433b",
+    "mtime": 1785056314.9849138,
+    "ast_hash": "9fa612088e27194950d013f56d543fe2",
     "semantic_hash": ""
   },
   "mobile/src/services/riskZones.ts": {
@@ -897,6 +892,61 @@
   "docs/PROJECT_GUIDE.md": {
     "mtime": 1784994615.8952303,
     "ast_hash": "e8cecfeabb01801e614bb164992c9759",
+    "semantic_hash": ""
+  },
+  "mobile/app/protection-tests.tsx": {
+    "mtime": 1785055396.5259166,
+    "ast_hash": "46855eaec1836b261d1146ebe54f469c",
+    "semantic_hash": ""
+  },
+  "mobile/app/stealth-mode.tsx": {
+    "mtime": 1785053590.522408,
+    "ast_hash": "fe0642d517b01862d92607169af89755",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/BrandLogo.tsx": {
+    "mtime": 1785054321.8424158,
+    "ast_hash": "1b3efe6c32dc2950e151b1618375d098",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/HomeEscapeTools.tsx": {
+    "mtime": 1785053545.1281388,
+    "ast_hash": "d23fcb894e9f46773fa3c85d3cbb8f6e",
+    "semantic_hash": ""
+  },
+  "mobile/src/inference/sosCountdown.ts": {
+    "mtime": 1785056125.3794503,
+    "ast_hash": "a9fc930373049c8560e6a1072d17c541",
+    "semantic_hash": ""
+  },
+  "mobile/src/inference/voiceTriggerLoudness.ts": {
+    "mtime": 1785055358.9996665,
+    "ast_hash": "15acce9d13d2e582d8d03a9ba420a17f",
+    "semantic_hash": ""
+  },
+  "mobile/assets/safecity-adaptive-icon.png": {
+    "mtime": 1785054268.298179,
+    "ast_hash": "c2b13edf555a6e45eaedd2a6ecd8090a",
+    "semantic_hash": ""
+  },
+  "mobile/assets/safecity-app-icon.png": {
+    "mtime": 1785054268.2871304,
+    "ast_hash": "952b2ba39884611db425c6bd805e53c0",
+    "semantic_hash": ""
+  },
+  "mobile/assets/safecity-logo.png": {
+    "mtime": 1785054268.315303,
+    "ast_hash": "efc3d372ce6131726a997bbbc3b5fc30",
+    "semantic_hash": ""
+  },
+  "mobile/assets/safecity-monochrome-icon.png": {
+    "mtime": 1785054268.2609406,
+    "ast_hash": "4c4577bfa1d8b15c769e1fab4dc7615d",
+    "semantic_hash": ""
+  },
+  "mobile/assets/safecity-notification-icon.png": {
+    "mtime": 1785054268.2135117,
+    "ast_hash": "80141780bb755790979b7efdf3b11e99",
     "semantic_hash": ""
   }
 }

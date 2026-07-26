@@ -3,6 +3,7 @@ import { Camera } from 'expo-camera';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { DeviceMotion } from 'expo-sensors';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 import {
   getPersistentVoiceTriggerState,
@@ -19,6 +20,7 @@ export interface PermissionSnapshot {
   locationBackground: boolean;
   notifications: boolean;
   fullScreenAlerts: boolean;
+  automaticSms: boolean;
 }
 
 function hasPreciseLocation(permission: Location.LocationPermissionResponse): boolean {
@@ -33,6 +35,26 @@ async function fullScreenAlertsAllowed(): Promise<boolean> {
   return (await getPersistentVoiceTriggerState()).fullScreenAllowed;
 }
 
+export async function hasAutomaticSmsPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.SEND_SMS);
+}
+
+export async function requestAutomaticSmsPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.SEND_SMS,
+    {
+      title: 'Allow automatic emergency messages?',
+      message:
+        'SafeCity uses SMS access only after a confirmed SOS to send your location and evidence to the contacts you selected.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Not now',
+    },
+  );
+  return result === PermissionsAndroid.RESULTS.GRANTED;
+}
+
 async function permissionSnapshot(
   camera: Awaited<ReturnType<typeof Camera.getCameraPermissionsAsync>>,
   microphone: Awaited<ReturnType<typeof AudioModule.getRecordingPermissionsAsync>>,
@@ -40,6 +62,7 @@ async function permissionSnapshot(
   foreground: Location.LocationPermissionResponse,
   background: Location.LocationPermissionResponse,
   notifications: Notifications.NotificationPermissionsStatus,
+  automaticSms: boolean,
 ): Promise<PermissionSnapshot> {
   const motionAvailable = await DeviceMotion.isAvailableAsync().catch(() => false);
   return {
@@ -51,15 +74,21 @@ async function permissionSnapshot(
     locationBackground: background.granted,
     notifications: notifications.granted,
     fullScreenAlerts: await fullScreenAlertsAllowed(),
+    automaticSms,
   };
 }
 
 export function allCorePermissionsGranted(snapshot: PermissionSnapshot): boolean {
-  return Object.values(snapshot).every(Boolean);
+  const { automaticSms: _automaticSms, ...monitoringPermissions } = snapshot;
+  return Object.values(monitoringPermissions).every(Boolean);
+}
+
+export function allSetupPermissionsGranted(snapshot: PermissionSnapshot): boolean {
+  return allCorePermissionsGranted(snapshot) && snapshot.automaticSms;
 }
 
 export async function getCorePermissionSnapshot(): Promise<PermissionSnapshot> {
-  const [camera, microphone, motion, foreground, background, notifications] =
+  const [camera, microphone, motion, foreground, background, notifications, automaticSms] =
     await Promise.all([
       Camera.getCameraPermissionsAsync(),
       AudioModule.getRecordingPermissionsAsync(),
@@ -67,6 +96,7 @@ export async function getCorePermissionSnapshot(): Promise<PermissionSnapshot> {
       Location.getForegroundPermissionsAsync(),
       Location.getBackgroundPermissionsAsync(),
       Notifications.getPermissionsAsync(),
+      hasAutomaticSmsPermission(),
     ]);
   return permissionSnapshot(
     camera,
@@ -75,6 +105,7 @@ export async function getCorePermissionSnapshot(): Promise<PermissionSnapshot> {
     foreground,
     background,
     notifications,
+    automaticSms,
   );
 }
 
@@ -91,6 +122,7 @@ export async function requestCorePermissions(): Promise<PermissionSnapshot> {
     background = await Location.requestBackgroundPermissionsAsync();
   }
   const notifications = await Notifications.requestPermissionsAsync();
+  const automaticSms = await requestAutomaticSmsPermission();
 
   return permissionSnapshot(
     camera,
@@ -99,6 +131,7 @@ export async function requestCorePermissions(): Promise<PermissionSnapshot> {
     foreground,
     background,
     notifications,
+    automaticSms,
   );
 }
 

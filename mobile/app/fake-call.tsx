@@ -5,7 +5,7 @@ import {
   type AudioPlayer,
   type AudioStatus,
 } from 'expo-audio';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, Vibration, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ActionButton } from '@/components/ActionButton';
 import { Screen } from '@/components/Screen';
 import { useLocalization } from '@/i18n/localization-provider';
+import { dismissTimedInterruption } from '@/services/timed-interruption';
 import type { TranslationKey } from '@/i18n/translations';
 import { colors, radii, spacing, type } from '@/theme/tokens';
 
@@ -229,9 +230,26 @@ function formatDuration(totalSeconds: number): string {
 
 export default function FakeCallScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    autoStart?: string | string[];
+    caller?: string | string[];
+  }>();
   const { t } = useLocalization();
-  const [phase, setPhase] = useState<CallPhase>('setup');
-  const [callerId, setCallerId] = useState<CallerId>('family');
+  const requestedCaller = Array.isArray(params.caller)
+    ? params.caller[0]
+    : params.caller;
+  const requestedAutoStart = Array.isArray(params.autoStart)
+    ? params.autoStart[0]
+    : params.autoStart;
+  const startedByTimer = requestedAutoStart === '1';
+  const initialCaller: CallerId =
+    requestedCaller === 'office' || requestedCaller === 'driver'
+      ? requestedCaller
+      : 'family';
+  const [phase, setPhase] = useState<CallPhase>(
+    startedByTimer ? 'ringing' : 'setup',
+  );
+  const [callerId, setCallerId] = useState<CallerId>(initialCaller);
   const [delay, setDelay] = useState<(typeof delays)[number]>(5);
   const [remaining, setRemaining] = useState(5);
   const [connectedSeconds, setConnectedSeconds] = useState(0);
@@ -272,6 +290,15 @@ export default function FakeCallScreen() {
     return () => Vibration.cancel();
   }, [phase]);
 
+  useEffect(
+    () => () => {
+      if (startedByTimer) {
+        void dismissTimedInterruption().catch(() => undefined);
+      }
+    },
+    [startedByTimer],
+  );
+
   useEffect(() => {
     if (phase !== 'connected') return;
     let firstVoiceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -307,6 +334,16 @@ export default function FakeCallScreen() {
     if (!source) return;
     playCallerVoice(source);
     setSpokenLineIndex((index) => index + 1);
+  };
+
+  const closeCall = () => {
+    void dismissTimedInterruption().catch(() => undefined);
+    router.back();
+  };
+
+  const answerCall = () => {
+    void dismissTimedInterruption().catch(() => undefined);
+    setPhase('connected');
   };
 
   if (phase === 'setup') {
@@ -362,7 +399,7 @@ export default function FakeCallScreen() {
 
   return (
     <SafeAreaView style={styles.callScreen} edges={['top', 'bottom', 'left', 'right']}>
-      <Pressable accessibilityRole="button" accessibilityLabel={t('common.back')} onPress={() => router.back()} style={styles.backButton}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t('common.back')} onPress={closeCall} style={styles.backButton}>
         <Text style={styles.backText}>‹</Text>
       </Pressable>
       <Text style={styles.simulationLabel}>{t('fakeCall.simulation')}</Text>
@@ -388,11 +425,11 @@ export default function FakeCallScreen() {
 
       {phase === 'ringing' ? (
         <View style={styles.callActions}>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('fakeCall.decline')} onPress={() => router.back()} style={[styles.callAction, styles.decline]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('fakeCall.decline')} onPress={closeCall} style={[styles.callAction, styles.decline]}>
             <Text style={styles.callActionIcon}>×</Text>
             <Text style={styles.callActionLabel}>{t('fakeCall.decline')}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('fakeCall.accept')} onPress={() => setPhase('connected')} style={[styles.callAction, styles.answer]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('fakeCall.accept')} onPress={answerCall} style={[styles.callAction, styles.answer]}>
             <Text style={styles.callActionIcon}>☎</Text>
             <Text style={styles.callActionLabel}>{t('fakeCall.accept')}</Text>
           </Pressable>
@@ -408,7 +445,7 @@ export default function FakeCallScreen() {
             <Text style={styles.voiceButtonIcon}>▶</Text>
             <Text style={styles.voiceButtonText}>{t('fakeCall.nextLine')}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('fakeCall.end')} onPress={() => router.back()} style={[styles.callAction, styles.decline]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('fakeCall.end')} onPress={closeCall} style={[styles.callAction, styles.decline]}>
             <Text style={styles.callActionIcon}>×</Text>
             <Text style={styles.callActionLabel}>{t('fakeCall.end')}</Text>
           </Pressable>

@@ -1,7 +1,7 @@
 import { useAudioStream, setAudioModeAsync, type AudioStreamBuffer } from 'expo-audio';
 import * as Battery from 'expo-battery';
 import * as Notifications from 'expo-notifications';
-import { useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import { DeviceMotion } from 'expo-sensors';
 import { useSQLiteContext } from 'expo-sqlite';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -106,12 +106,16 @@ import { MotionWindow } from '@/utils/motion';
 import { encodePcm16Wav } from '@/utils/wav';
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: false,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (notification) => {
+    const isTimedInterruption =
+      notification.request.content.data?.timedInterruption === true;
+    return {
+      shouldPlaySound: isTimedInterruption,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    };
+  },
 });
 
 interface MonitoringActions {
@@ -1639,12 +1643,31 @@ export function MonitoringProvider({ children }: PropsWithChildren) {
   }, [applyBatteryPolicy]);
 
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const openNotificationResponse = (
+      response: Notifications.NotificationResponse,
+    ) => {
       const incidentId = response.notification.request.content.data?.incidentId;
       if (typeof incidentId === 'string') {
         router.push({ pathname: '/capture', params: { incidentId } });
+        return;
       }
+      const interruptionPath =
+        response.notification.request.content.data?.interruptionPath;
+      if (
+        typeof interruptionPath === 'string' &&
+        interruptionPath.startsWith('/')
+      ) {
+        router.push(interruptionPath as Href);
+      }
+    };
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      openNotificationResponse(response);
+      void Notifications.clearLastNotificationResponseAsync();
     });
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      openNotificationResponse,
+    );
     return () => subscription.remove();
   }, [router]);
 
