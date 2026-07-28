@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Brand } from "./brand";
 import { Icon } from "./icons";
+import { FEEDBACK_URL } from "./site-links";
 
 const links = [
   { href: "/features", label: "Features" },
@@ -12,7 +13,6 @@ const links = [
   { href: "/safety", label: "Safety & trust" },
   { href: "/data-rights", label: "Your data" },
   { href: "/credits", label: "Team" },
-  { href: "/feedback", label: "Feedback" },
 ];
 
 export function Navigation() {
@@ -35,12 +35,21 @@ export function Navigation() {
               {link.label}
             </Link>
           ))}
+          <a
+            aria-label="Open the feedback form in a new tab"
+            href={FEEDBACK_URL}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Feedback
+          </a>
         </div>
         <Link className="button button-small nav-cta" href="/download">
           Download APK
           <Icon name="arrow" />
         </Link>
         <button
+          aria-controls="mobile-navigation"
           aria-expanded={open}
           aria-label={open ? "Close menu" : "Open menu"}
           className={`menu-button ${open ? "is-open" : ""}`}
@@ -51,13 +60,27 @@ export function Navigation() {
           <span />
         </button>
       </nav>
-      <div className={`mobile-nav ${open ? "is-open" : ""}`}>
+      <div
+        aria-hidden={!open}
+        className={`mobile-nav ${open ? "is-open" : ""}`}
+        id="mobile-navigation"
+      >
         {links.map((link) => (
           <Link href={link.href} key={link.href}>
             {link.label}
             <Icon name="arrow" />
           </Link>
         ))}
+        <a
+          aria-label="Open the feedback form in a new tab"
+          href={FEEDBACK_URL}
+          onClick={() => setOpen(false)}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          Feedback
+          <Icon name="arrow" />
+        </a>
         <Link className="button" href="/download">
           Download APK
         </Link>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Brand } from "./brand";
 import { Icon } from "./icons";
-import { STACKOVERHACK_LINKS } from "./site-links";
+import { FEEDBACK_URL, STACKOVERHACK_LINKS } from "./site-links";
 
 const groups = [
   {
@@ -79,9 +79,21 @@ export function Footer() {
           <div className="footer-group" key={group.label}>
             <p>{group.label}</p>
             {group.links.map(([href, label]) => (
-              <Link href={href} key={href}>
-                {label}
-              </Link>
+              href === "/feedback" ? (
+                <a
+                  aria-label="Open the feedback form in a new tab"
+                  href={FEEDBACK_URL}
+                  key={href}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  {label}
+                </a>
+              ) : (
+                <Link href={href} key={href}>
+                  {label}
+                </Link>
+              )
             ))}
           </div>
         ))}

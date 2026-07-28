@@ -46,6 +46,19 @@ body {
   overflow-x: hidden;
 }
 
+main,
+section,
+.container,
+.container > *,
+.nav-shell > *,
+.footer-grid > * {
+  min-width: 0;
+}
+
+main {
+  overflow: clip;
+}
+
 body::selection {
   color: var(--night);
   background: var(--cyan);
@@ -67,6 +80,8 @@ img,
 svg {
   display: block;
 }
+
+img { max-width: 100%; }
 
 h1,
 h2,
@@ -1948,7 +1963,7 @@ summary:focus-visible {
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 960px) {
   :root {
     --container: min(100% - 32px, 720px);
   }
@@ -1958,7 +1973,7 @@ summary:focus-visible {
   }
 
   .site-header {
-    top: 10px;
+    top: max(10px, env(safe-area-inset-top));
     width: calc(100% - 20px);
   }
 
@@ -1979,6 +1994,8 @@ summary:focus-visible {
     width: 42px;
     height: 42px;
     margin-left: auto;
+    cursor: pointer;
+    touch-action: manipulation;
     place-content: center;
     color: white;
     border: 1px solid var(--line);
@@ -2003,26 +2020,37 @@ summary:focus-visible {
   }
 
   .mobile-nav {
+    position: absolute;
+    top: calc(100% + 7px);
+    right: 0;
+    left: 0;
     display: grid;
-    max-height: 0;
-    margin-top: 7px;
-    padding: 0 14px;
-    border: 1px solid transparent;
+    max-height: calc(100dvh - 96px - env(safe-area-inset-top));
+    padding: 14px;
+    border: 1px solid var(--line);
     border-radius: 18px;
     background: rgba(5, 10, 18, 0.96);
     backdrop-filter: blur(22px);
     opacity: 0;
-    overflow: hidden;
-    transform: translateY(-8px);
-    transition: max-height 260ms ease, opacity 180ms ease, transform 180ms ease, padding 260ms ease;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    pointer-events: none;
+    transform: translateY(-8px) scale(0.985);
+    transform-origin: top;
+    visibility: hidden;
+    transition:
+      opacity 180ms ease-out,
+      transform 180ms ease-out,
+      visibility 0s linear 180ms;
   }
 
   .mobile-nav.is-open {
-    max-height: 420px;
-    padding: 14px;
-    border-color: var(--line);
     opacity: 1;
+    pointer-events: auto;
     transform: translateY(0);
+    visibility: visible;
+    transition-delay: 0s;
   }
 
   .mobile-nav > a:not(.button) {
@@ -2030,6 +2058,7 @@ summary:focus-visible {
     align-items: center;
     justify-content: space-between;
     padding: 16px 4px;
+    min-height: 52px;
     color: #b3c0cb;
     border-bottom: 1px solid var(--line);
     font-size: 0.9rem;
@@ -2299,7 +2328,7 @@ summary:focus-visible {
   }
 
   .footer-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .footer-lead {
@@ -2309,6 +2338,16 @@ summary:focus-visible {
 
   .footer-bottom {
     display: grid;
+  }
+
+  .footer-socials a {
+    display: inline-flex;
+    min-height: 42px;
+    align-items: center;
+  }
+
+  .footer-bottom p {
+    max-width: none;
   }
 
   .page-hero {
@@ -7380,6 +7419,76 @@ summary:focus-visible {
 
   .right-row-copy p {
     font-size: 0.7rem;
+  }
+}
+
+/* Extra-small mobile hardening */
+@media (max-width: 420px) {
+  :root {
+    --container: calc(100% - 20px);
+  }
+
+  .site-header {
+    width: calc(100% - 16px);
+  }
+
+  .nav-shell {
+    padding-left: 12px;
+  }
+
+  .mobile-nav {
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+    border-radius: 16px;
+  }
+
+  .section {
+    padding-block: 68px;
+  }
+
+  .page-hero-rich h1,
+  .data-rights-hero-copy h1,
+  .credits-hero-heading h1 {
+    font-size: clamp(2.8rem, 13vw, 3.45rem);
+  }
+
+  .page-hero-rich-grid {
+    gap: 30px;
+  }
+
+  .features-hero-visual,
+  .flow-hero-visual,
+  .trust-hero-visual {
+    min-height: 440px;
+  }
+
+  .credits-team .team-card {
+    grid-template-columns: 112px minmax(0, 1fr);
+    min-height: 236px;
+  }
+
+  .team-photo,
+  .team-card-content {
+    min-height: 236px;
+  }
+
+  .team-card-content {
+    padding: 18px 14px;
+  }
+
+  .team-card-content h2 {
+    font-size: 1.08rem;
+  }
+
+  .download-qr-card {
+    padding: 18px;
+  }
+
+  .legal-index nav {
+    grid-template-columns: 1fr;
+  }
+
+  .legal-meta {
+    gap: 8px;
   }
 }
 
